@@ -11,18 +11,21 @@
  */
 package org.eclipse.hono.service.registration;
 
-import static java.net.HttpURLConnection.HTTP_BAD_REQUEST;
+import static java.net.HttpURLConnection.*;
 import static org.eclipse.hono.util.RegistrationConstants.*;
 
-import java.net.HttpURLConnection;
+import java.util.Objects;
 
+import org.eclipse.hono.config.ServiceConfigProperties;
+import org.eclipse.hono.util.ConfigurationSupportingVerticle;
 import org.eclipse.hono.util.MessageHelper;
 import org.eclipse.hono.util.RegistrationConstants;
 import org.eclipse.hono.util.RegistrationResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 
-import io.vertx.core.AbstractVerticle;
 import io.vertx.core.AsyncResult;
 import io.vertx.core.Future;
 import io.vertx.core.Handler;
@@ -36,25 +39,51 @@ import io.vertx.core.json.JsonObject;
  * In particular, this base class provides support for parsing registration request messages
  * received via the event bus and route them to specific methods corresponding to the <em>action</em>
  * indicated in the message.
+ * 
+ * @param <T> The type of configuration properties this service supports.
  */
-public abstract class BaseRegistrationService extends AbstractVerticle implements RegistrationService {
+public abstract class BaseRegistrationService<T extends ServiceConfigProperties> extends ConfigurationSupportingVerticle<T> implements RegistrationService {
 
     /**
      * A logger to be shared by subclasses.
      */
     protected final Logger log = LoggerFactory.getLogger(getClass());
     private MessageConsumer<JsonObject> registrationConsumer;
+    private RegistrationAssertionHelper assertionFactory;
 
     /**
-     * Registers a Vert.x event consumer for address {@link RegistrationConstants#EVENT_BUS_ADDRESS_REGISTRATION_IN}
-     * and then invokes {@link #doStart(Future)}.
+     * Sets the factory to use for creating tokens asserting a device's registration status.
+     * 
+     * @param assertionFactory The factory.
+     * @throws NullPointerException if factory is {@code null}.
+     */
+    @Autowired
+    @Qualifier("signing")
+    public final void setRegistrationAssertionFactory(final RegistrationAssertionHelper assertionFactory) {
+        this.assertionFactory = Objects.requireNonNull(assertionFactory);
+    }
+
+    /**
+     * Starts up this service.
+     * <p>
+     * <ol>
+     * <li>Checks if <em>registrationAssertionFactory</em>is set. If not, startup fails.</li>
+     * <li>Registers an event bus consumer for address {@link RegistrationConstants#EVENT_BUS_ADDRESS_REGISTRATION_IN}
+     * listening for registration requests.</li>
+     * <li>Invokes {@link #doStart(Future)}.</li>
+     * </ol>
      *
-     * @param startFuture future to invoke once start up is complete.
+     * @param startFuture The future to complete on successful startup.
      */
     @Override
-    public final void start(final Future<Void> startFuture) throws Exception {
-        registerConsumer();
-        doStart(startFuture);
+    public final void start(final Future<Void> startFuture) {
+
+        if (assertionFactory == null) {
+            startFuture.fail("registration assertion factory must be set");
+        } else {
+            registerConsumer();
+            doStart(startFuture);
+        }
     }
 
     /**
@@ -64,9 +93,8 @@ public abstract class BaseRegistrationService extends AbstractVerticle implement
      * </p>
      *
      * @param startFuture future to invoke once start up is complete.
-     * @throws Exception if start-up fails
      */
-    protected void doStart(final Future<Void> startFuture) throws Exception {
+    protected void doStart(final Future<Void> startFuture) {
         // should be overridden by subclasses
         startFuture.complete();
     }
@@ -117,6 +145,10 @@ public abstract class BaseRegistrationService extends AbstractVerticle implement
             final String action = body.getString(RegistrationConstants.FIELD_ACTION);
 
             switch (action) {
+            case ACTION_ASSERT:
+                log.debug("asserting registration of device [{}] with tenant [{}]", deviceId, tenantId);
+                assertRegistration(tenantId, deviceId, result -> reply(regMsg, result));
+                break;
             case ACTION_GET:
                 log.debug("retrieving device [{}] of tenant [{}]", deviceId, tenantId);
                 getDevice(tenantId, deviceId, result -> reply(regMsg, result));
@@ -159,17 +191,61 @@ public abstract class BaseRegistrationService extends AbstractVerticle implement
     /**
      * {@inheritDoc}
      * <p>
+     * Subclasses may override this method in order to implement a more sophisticated approach for asserting registration status, e.g.
+     * using cached information etc.
+     */
+    @Override
+    public void assertRegistration(final String tenantId, final String deviceId, final Handler<AsyncResult<RegistrationResult>> resultHandler) {
+        getDevice(tenantId, deviceId, getAttempt -> {
+            if (getAttempt.failed()) {
+                resultHandler.handle(getAttempt);
+            } else {
+                final RegistrationResult result = getAttempt.result();
+                if (result.getStatus() == HTTP_NOT_FOUND) {
+                    // device is not registered with tenant
+                    resultHandler.handle(getAttempt);
+                } else if (isDeviceEnabled(result.getPayload().getJsonObject(RegistrationConstants.FIELD_DATA))){
+                    // device is registered with tenant and is enabled
+                    resultHandler.handle(Future.succeededFuture(RegistrationResult.from(HTTP_OK, getAssertionPayload(tenantId, deviceId))));
+                } else {
+                    resultHandler.handle(Future.succeededFuture(RegistrationResult.from(HTTP_NOT_FOUND)));
+                }
+            }
+        });
+    }
+
+    private boolean isDeviceEnabled(final JsonObject registrationData) {
+        return registrationData.getBoolean(FIELD_ENABLED, Boolean.TRUE);
+    }
+
+    /**
+     * Creates a registration assertion token for a device and wraps it in a JSON object.
+     * 
+     * @param tenantId The tenant the device belongs to.
+     * @param deviceId The device to create the assertion token for.
+     * @return The payload.
+     */
+    protected final JsonObject getAssertionPayload(final String tenantId, final String deviceId) {
+
+        return new JsonObject()
+                .put(FIELD_HONO_ID, deviceId)
+                .put(FIELD_ASSERTION, assertionFactory.getAssertion(tenantId, deviceId));
+    }
+
+    /**
      * This default implementation simply invokes {@link RegistrationService#getDevice(String, String, Handler)}
      * with the parameters passed in to this method.
      * <p>
      * Subclasses should override this method in order to use a more efficient way of determining the device's status.
+     * @param tenantId 
+     * @param deviceId 
+     * @param resultHandler 
      */
-    @Override
     public void isEnabled(final String tenantId, final String deviceId, Handler<AsyncResult<RegistrationResult>> resultHandler) {
         getDevice(tenantId, deviceId, getAttempt -> {
             if (getAttempt.succeeded()) {
                 RegistrationResult result = getAttempt.result();
-                if (result.getStatus() == HttpURLConnection.HTTP_OK) {
+                if (result.getStatus() == HTTP_OK) {
                     resultHandler.handle(Future.succeededFuture(RegistrationResult.from(result.getStatus(), result.getPayload().getJsonObject(RegistrationConstants.FIELD_DATA))));
                 } else {
                     resultHandler.handle(getAttempt);
@@ -185,7 +261,7 @@ public abstract class BaseRegistrationService extends AbstractVerticle implement
         if (result.succeeded()) {
             reply(request, result.result());
         } else {
-            request.fail(HttpURLConnection.HTTP_INTERNAL_ERROR, "cannot process registration request");
+            request.fail(HTTP_INTERNAL_ERROR, "cannot process registration request");
         }
     }
 

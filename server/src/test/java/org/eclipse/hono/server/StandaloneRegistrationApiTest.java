@@ -23,6 +23,7 @@ import org.eclipse.hono.client.RegistrationClient;
 import org.eclipse.hono.client.impl.HonoClientImpl;
 import org.eclipse.hono.config.ServiceConfigProperties;
 import org.eclipse.hono.connection.ConnectionFactoryImpl.ConnectionFactoryBuilder;
+import org.eclipse.hono.service.registration.RegistrationAssertionHelperImpl;
 import org.eclipse.hono.service.registration.RegistrationEndpoint;
 import org.eclipse.hono.service.registration.impl.FileBasedRegistrationService;
 import org.eclipse.hono.util.AggregatingInvocationResultHandler;
@@ -57,6 +58,7 @@ public class StandaloneRegistrationApiTest {
     private static final String                DEVICE_1 = DEVICE_PREFIX + "1";
     private static final String                USER = "hono-client";
     private static final String                PWD = "secret";
+    private static final String                SECRET = "hiusfdazuisdfibgbgabvbzusdatgfASFJSDAFJSDAOF";
 
     private static Vertx                       vertx = Vertx.vertx();
     private static HonoServer                  server;
@@ -75,6 +77,7 @@ public class StandaloneRegistrationApiTest {
         server.setConfig(configProperties);
         server.addEndpoint(new RegistrationEndpoint(vertx));
         registrationAdapter = new FileBasedRegistrationService();
+        registrationAdapter.setRegistrationAssertionFactory(RegistrationAssertionHelperImpl.forSharedSecret(SECRET, 10));
 
         Future<RegistrationClient> setupTracker = Future.future();
         setupTracker.setHandler(ctx.asyncAssertSuccess(r -> {
@@ -204,7 +207,7 @@ public class StandaloneRegistrationApiTest {
         });
     }
 
-    @Test(timeout = 10000l)
+    @Test(timeout = TIMEOUT)
     public void testRegisterDevices(final TestContext ctx) {
 
         Future<RegistrationResult> done = Future.future();

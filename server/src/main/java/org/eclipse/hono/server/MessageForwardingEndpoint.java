@@ -20,11 +20,16 @@ import java.util.UUID;
 
 import org.apache.qpid.proton.amqp.transport.AmqpError;
 import org.apache.qpid.proton.message.Message;
+import org.eclipse.hono.config.ServiceConfigProperties;
 import org.eclipse.hono.service.amqp.BaseEndpoint;
 import org.eclipse.hono.service.amqp.UpstreamReceiver;
+import org.eclipse.hono.service.registration.RegistrationAssertionHelper;
 import org.eclipse.hono.util.Constants;
 import org.eclipse.hono.util.MessageHelper;
 import org.eclipse.hono.util.ResourceIdentifier;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.actuate.metrics.CounterService;
 
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
@@ -32,22 +37,40 @@ import io.vertx.core.eventbus.MessageConsumer;
 import io.vertx.proton.ProtonDelivery;
 import io.vertx.proton.ProtonQoS;
 import io.vertx.proton.ProtonReceiver;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.actuate.metrics.CounterService;
 
 /**
  * A base class for implementing Hono {@code Endpoint}s that forward messages
  * to a downstream container.
- *
+ * 
+ * @param <T> The type of configuration properties this endpoint understands.
  */
-public abstract class MessageForwardingEndpoint extends BaseEndpoint {
+public abstract class MessageForwardingEndpoint<T extends ServiceConfigProperties> extends BaseEndpoint<T> {
 
     private CounterService                counterService = NullCounterService.getInstance();
     private DownstreamAdapter             downstreamAdapter;
     private MessageConsumer<String>       clientDisconnectListener;
+    private RegistrationAssertionHelper   registrationAssertionValidator;
 
+    /**
+     * Creates an endpoint for a Vertx instance.
+     * 
+     * @param vertx The Vertx instance to use.
+     */
     protected MessageForwardingEndpoint(final Vertx vertx) {
         super(Objects.requireNonNull(vertx));
+    }
+
+    /**
+     * Sets the object to use for validatingJWT tokens asserting a device's registration
+     * status.
+     * 
+     * @param validator The validator.
+     * @throws NullPointerException if validator is {@code null}.
+     */
+    @Autowired
+    @Qualifier("validation")
+    public void setRegistrationAssertionValidator(final RegistrationAssertionHelper validator) {
+        registrationAssertionValidator = Objects.requireNonNull(validator);
     }
 
     /**
@@ -72,7 +95,9 @@ public abstract class MessageForwardingEndpoint extends BaseEndpoint {
     @Override
     protected final void doStart(Future<Void> startFuture) {
         if (downstreamAdapter == null) {
-            startFuture.fail("no downstream adapter configured on Telemetry endpoint");
+            startFuture.fail("no downstream adapter configured on endpoint");
+        } else if (registrationAssertionValidator == null) {
+            startFuture.fail("no registration assertion validator has been set");
         } else {
             clientDisconnectListener = vertx.eventBus().consumer(
                     Constants.EVENT_BUS_ADDRESS_CONNECTION_CLOSED,
@@ -137,25 +162,28 @@ public abstract class MessageForwardingEndpoint extends BaseEndpoint {
         });
     }
 
-    private void forwardMessage(final UpstreamReceiver link, final ProtonDelivery delivery, final Message msg) {
+    final void forwardMessage(final UpstreamReceiver link, final ProtonDelivery delivery, final Message msg) {
 
         final ResourceIdentifier messageAddress = ResourceIdentifier.fromString(getAnnotation(msg, APP_PROPERTY_RESOURCE, String.class));
-        checkDeviceEnabled(messageAddress, checkAttempt -> {
-            if (checkAttempt.failed()) {
-                MessageHelper.rejected(delivery, AmqpError.INTERNAL_ERROR.toString(), "cannot determine device status");
-                link.close(condition(AmqpError.INTERNAL_ERROR.toString(), "internal error"));
-            } else {
-                boolean deviceEnabled = checkAttempt.result();
-                if (deviceEnabled) {
-                    downstreamAdapter.processMessage(link, delivery, msg);
-                } else {
-                    logger.debug("device {}/{} does not exist or is not enabled, closing link",
-                            messageAddress.getTenantId(), messageAddress.getResourceId());
-                    MessageHelper.rejected(delivery, AmqpError.PRECONDITION_FAILED.toString(), "device non-existent/disabled");
-                    link.close(condition(AmqpError.PRECONDITION_FAILED.toString(), "device non-existent/disabled"));
-                }
-            }
-        });
+        final String token = MessageHelper.getRegistrationAssertion(msg);
+
+        if (assertRegistration(token, messageAddress)) {
+            downstreamAdapter.processMessage(link, delivery, msg);
+        } else {
+            logger.debug("failed to validate device registration status");
+            MessageHelper.rejected(delivery, AmqpError.PRECONDITION_FAILED.toString(), "device non-existent/disabled");
+            link.close(condition(AmqpError.PRECONDITION_FAILED.toString(), "device non-existent/disabled"));
+        }
+    }
+
+    private boolean assertRegistration(final String token, final ResourceIdentifier resource) {
+
+        if (token == null) {
+            logger.debug("token is null");
+            return false;
+        } else {
+            return registrationAssertionValidator.isValid(token, resource.getTenantId(), resource.getResourceId());
+        }
     }
 
     /**

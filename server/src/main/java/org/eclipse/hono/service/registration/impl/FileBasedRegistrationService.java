@@ -21,6 +21,7 @@ import java.util.Map.Entry;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.eclipse.hono.config.ServiceConfigProperties;
 import org.eclipse.hono.service.registration.BaseRegistrationService;
 import org.eclipse.hono.util.RegistrationResult;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -44,7 +45,7 @@ import io.vertx.core.json.JsonObject;
 @Repository
 @ConfigurationProperties(prefix = "hono.registration")
 @Profile({"default", "registration-file"})
-public class FileBasedRegistrationService extends BaseRegistrationService {
+public class FileBasedRegistrationService extends BaseRegistrationService<ServiceConfigProperties> {
 
     /**
      * The default number of devices that can be registered for each tenant.
@@ -125,7 +126,7 @@ public class FileBasedRegistrationService extends BaseRegistrationService {
     }
 
     @Override
-    protected void doStart(Future<Void> startFuture) throws Exception {
+    protected void doStart(Future<Void> startFuture) {
 
         if (!running) {
             if (!isModificationEnabled) {
@@ -305,6 +306,14 @@ public class FileBasedRegistrationService extends BaseRegistrationService {
         resultHandler.handle(Future.succeededFuture(addDevice(tenantId, deviceId, data)));
     }
 
+    /**
+     * Adds a device to this registry.
+     * 
+     * @param tenantId The tenant the device belongs to.
+     * @param deviceId The ID of the device to add.
+     * @param data Additional data to register with the device (may be {@code null}).
+     * @return The outcome of the operation indicating success or failure.
+     */
     public RegistrationResult addDevice(final String tenantId, final String deviceId, final JsonObject data) {
 
         JsonObject obj = data != null ? data : new JsonObject().put(FIELD_ENABLED, Boolean.TRUE);
