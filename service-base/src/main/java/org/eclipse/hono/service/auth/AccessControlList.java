@@ -9,7 +9,7 @@
  * Contributors:
  *    Bosch Software Innovations GmbH - initial API and implementation and initial documentation
  */
-package org.eclipse.hono.service.authorization;
+package org.eclipse.hono.service.auth;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -31,7 +31,7 @@ public class AccessControlList
         return entries.get(subject);
     }
 
-    public boolean hasPermission(final String subject, final Permission permission) {
+    public boolean hasPermission(final String subject, final Activity permission) {
         return Optional.ofNullable(entries.get(subject)).map(entry -> entry.getPermissions().contains(permission))
                 .orElse(false);
     }

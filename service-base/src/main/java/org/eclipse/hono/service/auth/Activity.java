@@ -9,12 +9,12 @@
  * Contributors:
  *    Bosch Software Innovations GmbH - initial API and implementation and initial documentation
  */
-package org.eclipse.hono.service.authorization;
+package org.eclipse.hono.service.auth;
 
 /**
  * Defines permissions that are required to access Hono service resources.
  */
-public enum Permission
+public enum Activity
 {
     /**
      * Permission required for receiving message from a node.
@@ -23,5 +23,9 @@ public enum Permission
     /**
      * Permission required for sending messages to a node.
      */
-    WRITE
+    WRITE,
+    /**
+     * Permission required for executing an operation on a node.
+     */
+    EXECUTE
 }

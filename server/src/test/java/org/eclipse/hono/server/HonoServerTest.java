@@ -23,11 +23,13 @@ import java.util.concurrent.TimeUnit;
 import org.apache.qpid.proton.amqp.transport.Target;
 import org.apache.qpid.proton.engine.Record;
 import org.apache.qpid.proton.engine.impl.RecordImpl;
+import org.apache.qpid.proton.message.Message;
 import org.eclipse.hono.TestSupport;
+import org.eclipse.hono.auth.HonoUser;
 import org.eclipse.hono.service.amqp.BaseEndpoint;
 import org.eclipse.hono.service.amqp.Endpoint;
-import org.eclipse.hono.service.authorization.AuthorizationConstants;
-import org.eclipse.hono.service.authorization.Permission;
+import org.eclipse.hono.service.auth.AuthorizationConstants;
+import org.eclipse.hono.service.auth.Activity;
 import org.eclipse.hono.telemetry.TelemetryConstants;
 import org.eclipse.hono.util.Constants;
 import org.eclipse.hono.util.ResourceIdentifier;
@@ -91,9 +93,14 @@ public class HonoServerTest {
             public void onLinkAttach(final ProtonReceiver receiver, final ResourceIdentifier targetResource) {
                 linkEstablished.countDown();
             }
+
+            @Override
+            protected boolean passesFormalVerification(ResourceIdentifier targetAddress, Message message) {
+                return true;
+            }
         };
         HonoServer server = createServer(telemetryEndpoint);
-        final JsonObject authMsg = AuthorizationConstants.getAuthorizationMsg(Constants.SUBJECT_ANONYMOUS, targetAddress, Permission.WRITE.toString());
+        final JsonObject authMsg = AuthorizationConstants.getAuthorizationMsg(Constants.SUBJECT_ANONYMOUS, targetAddress, Activity.WRITE.toString());
         TestSupport.expectReplyForMessage(eventBus, server.getAuthServiceAddress(), authMsg, AuthorizationConstants.ALLOWED);
 
         // WHEN a client connects to the server using a telemetry address
@@ -117,7 +124,7 @@ public class HonoServerTest {
         final Endpoint telemetryEndpoint = mock(Endpoint.class);
         when(telemetryEndpoint.getName()).thenReturn(TelemetryConstants.TELEMETRY_ENDPOINT);
         HonoServer server = createServer(telemetryEndpoint);
-        final JsonObject authMsg = AuthorizationConstants.getAuthorizationMsg(UNAUTHORIZED_SUBJECT, restrictedTargetAddress, Permission.WRITE.toString());
+        final JsonObject authMsg = AuthorizationConstants.getAuthorizationMsg(UNAUTHORIZED_SUBJECT, restrictedTargetAddress, Activity.WRITE.toString());
         TestSupport.expectReplyForMessage(eventBus, server.getAuthServiceAddress(), authMsg, AuthorizationConstants.DENIED);
 
         // WHEN a client connects to the server using a telemetry address for a tenant it is not authorized to write to
@@ -176,7 +183,7 @@ public class HonoServerTest {
     private static ProtonConnection newAuthenticatedConnection(final String name) {
         final Record attachments = new RecordImpl();
         attachments.set(Constants.KEY_CONNECTION_ID, String.class, CON_ID);
-        attachments.set(Constants.KEY_CLIENT_PRINCIPAL, Principal.class, new Principal() {
+        attachments.set(Constants.KEY_CLIENT_PRINCIPAL, HonoUser.class, new HonoUser() {
 
             @Override
             public String getName() {

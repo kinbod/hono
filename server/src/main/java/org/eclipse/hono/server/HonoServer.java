@@ -13,7 +13,7 @@ package org.eclipse.hono.server;
 
 import static io.vertx.proton.ProtonHelper.condition;
 import static org.apache.qpid.proton.amqp.transport.AmqpError.UNAUTHORIZED_ACCESS;
-import static org.eclipse.hono.service.authorization.AuthorizationConstants.EVENT_BUS_ADDRESS_AUTHORIZATION_IN;
+import static org.eclipse.hono.service.auth.AuthorizationConstants.EVENT_BUS_ADDRESS_AUTHORIZATION_IN;
 
 import java.security.Principal;
 import java.util.UUID;
@@ -24,8 +24,8 @@ import org.apache.qpid.proton.engine.Record;
 import org.eclipse.hono.config.ServiceConfigProperties;
 import org.eclipse.hono.service.amqp.AmqpServiceBase;
 import org.eclipse.hono.service.amqp.Endpoint;
-import org.eclipse.hono.service.authorization.AuthorizationConstants;
-import org.eclipse.hono.service.authorization.Permission;
+import org.eclipse.hono.service.auth.AuthorizationConstants;
+import org.eclipse.hono.service.auth.Activity;
 import org.eclipse.hono.telemetry.TelemetryConstants;
 import org.eclipse.hono.util.Constants;
 import org.eclipse.hono.util.RegistrationConstants;
@@ -154,7 +154,7 @@ public final class HonoServer extends AmqpServiceBase<ServiceConfigProperties> {
                     handleUnknownEndpoint(con, receiver, targetResource);
                 } else {
                     final String user = getUserFromConnection(con);
-                    checkAuthorizationToAttach(user, targetResource, Permission.WRITE, isAuthorized -> {
+                    checkAuthorizationToAttach(user, targetResource, Activity.WRITE, isAuthorized -> {
                         if (isAuthorized) {
                             copyConnectionId(con.attachments(), receiver.attachments());
                             receiver.setTarget(receiver.getRemoteTarget());
@@ -221,7 +221,7 @@ public final class HonoServer extends AmqpServiceBase<ServiceConfigProperties> {
                 handleUnknownEndpoint(con, sender, targetResource);
             } else {
                 final String user = getUserFromConnection(con);
-                checkAuthorizationToAttach(user, targetResource, Permission.READ, isAuthorized -> {
+                checkAuthorizationToAttach(user, targetResource, Activity.READ, isAuthorized -> {
                     if (isAuthorized) {
                         copyConnectionId(con.attachments(), sender.attachments());
                         sender.setSource(sender.getRemoteSource());
@@ -238,7 +238,7 @@ public final class HonoServer extends AmqpServiceBase<ServiceConfigProperties> {
         }
     }
 
-    private void checkAuthorizationToAttach(final String user, final ResourceIdentifier targetResource, final Permission permission,
+    private void checkAuthorizationToAttach(final String user, final ResourceIdentifier targetResource, final Activity permission,
        final Handler<Boolean> authResultHandler) {
 
         final JsonObject authRequest = AuthorizationConstants.getAuthorizationMsg(user, targetResource.toString(),
