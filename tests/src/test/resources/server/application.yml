@@ -1,6 +1,6 @@
 hono:
   auth:
-    host: auth
+    host: auth-server.hono
     port: 5672
     name: hono-server
     validation:
@@ -16,6 +16,7 @@ hono:
     waitForDownstreamConnectionEnabled: true
     registrationAssertion:
       sharedSecret: sdgfsdafazufgsdafjhfgsdajfgwhriojsdafjlksdhfgsa8fg452368gdf
+    startupTimeout: 65
 
 ---
 
@@ -23,7 +24,7 @@ spring:
   profiles: qpid
 hono:
   downstream:
-    host: qdrouter
+    host: qdrouter.hono
     port: 5673
     keyPath: /etc/hono/certs/hono-key.pem
     certPath: /etc/hono/certs/hono-cert.pem
