@@ -190,6 +190,47 @@ public class HonoClientImplTest {
     }
 
     /**
+     * Verifies that all sender creation locks are cleared when the connection to the server fails.
+     * 
+     * @param ctx The Vertx test context.
+     */
+    @Test
+    public void testDownstreamDisconnectClearsSenderCreationLocks(final TestContext ctx) {
+
+        final ProtonConnection connectionToCreate = mock(ProtonConnection.class);
+        when(connectionToCreate.getRemoteContainer()).thenReturn("server");
+        // expect the connection factory to be invoked twice
+        // first on initial connection
+        // second on reconnect
+        DisconnectHandlerProvidingConnectionFactory connectionFactory = new DisconnectHandlerProvidingConnectionFactory(connectionToCreate, 2);
+
+        // GIVEN a client connected to a server
+        final Async connected = ctx.async();
+        HonoClientImpl client = new HonoClientImpl(vertx, connectionFactory);
+        client.connect(new ProtonClientOptions().setReconnectAttempts(1), ctx.asyncAssertSuccess(ok -> connected.complete()));
+        connected.await(200);
+
+        final Async senderCreationFailure = ctx.async();
+        // WHEN the downstream connection fails just when the client wants to open a sender link
+        client.getOrCreateSender("telemetry/tenant", creationAttemptHandler -> {
+            connectionFactory.getDisconnectHandler().handle(connectionToCreate);
+            // the creationAttempHandler will not be invoked at all
+        }, ctx.asyncAssertFailure(cause -> senderCreationFailure.complete()));
+
+        // THEN the sender creation fails,
+        senderCreationFailure.await(1000);
+        // the connection is re-established
+        connectionFactory.await(1, TimeUnit.SECONDS);
+        // and the next attempt to create a sender succeeds
+        final Async senderSupplierInvocation = ctx.async();
+        client.getOrCreateSender("telemetry/tenant", creationAttemptHandler -> {
+            senderSupplierInvocation.complete();
+            creationAttemptHandler.handle(Future.succeededFuture(mock(MessageSender.class)));
+        }, ctx.asyncAssertSuccess());
+        senderSupplierInvocation.await(1000);
+    }
+
+    /**
      * Verifies that the client tries to re-establish a lost connection to a server.
      * 
      * @param ctx The Vertx test context.
@@ -219,36 +260,79 @@ public class HonoClientImplTest {
 
     /**
      * Verifies that the client adapter repeatedly tries to connect until a connection is established.
+     * 
+     * @param ctx The test context.
      */
     @Test
-    public void testConnectTriesToReconnectOnFailedConnectAttempt() {
+    public void testConnectTriesToReconnectOnFailedConnectAttempt(final TestContext ctx) {
 
-        // expect the connection factory to be invoked 3 times
-        DisconnectHandlerProvidingConnectionFactory connectionFactory = new DisconnectHandlerProvidingConnectionFactory(null, 3);
-
-        // GIVEN an client that cannot connect to the server
+        // GIVEN a client that cannot connect to the server
+        ProtonConnection con = mock(ProtonConnection.class);
+        // expect the connection factory to fail twice and succeed on third connect attempt
+        DisconnectHandlerProvidingConnectionFactory connectionFactory = new DisconnectHandlerProvidingConnectionFactory(con, 1, 2);
         HonoClientImpl client = new HonoClientImpl(vertx, connectionFactory);
 
         // WHEN trying to connect
-        client.connect(new ProtonClientOptions().setReconnectAttempts(1), attempt -> {});
+        Async disconnectHandlerInvocation = ctx.async();
+        Async connectionEstablished = ctx.async();
+        Handler<ProtonConnection> disconnectHandler = failedCon -> disconnectHandlerInvocation.complete();
+        client.connect(
+                new ProtonClientOptions().setReconnectAttempts(1),
+                ctx.asyncAssertSuccess(ok -> connectionEstablished.complete()),
+                disconnectHandler);
 
         // THEN the client repeatedly tries to connect
-        assertTrue(connectionFactory.await(4 * Constants.DEFAULT_RECONNECT_INTERVAL_MILLIS, TimeUnit.MILLISECONDS));
+        connectionEstablished.await(4 * Constants.DEFAULT_RECONNECT_INTERVAL_MILLIS);
+        // and sets the disconnect handler provided as a param in the connect method invocation
+        connectionFactory.getDisconnectHandler().handle(con);
+        disconnectHandlerInvocation.await(1000);
+    }
+
+    /**
+     * Verifies that the client tries to re-connect to a server instance if the connection is closed by the peer.
+     * 
+     * @param ctx The test context.
+     *
+     */
+    @Test
+    public void testOnRemoteCloseTriggersReconnection(final TestContext ctx) {
+
+        // GIVEN a client that is connected to a server
+        ProtonConnection con = mock(ProtonConnection.class);
+        DisconnectHandlerProvidingConnectionFactory connectionFactory = new DisconnectHandlerProvidingConnectionFactory(con, 2);
+        HonoClientImpl client = new HonoClientImpl(vertx, connectionFactory);
+        Async disconnectHandlerInvocation = ctx.async();
+        Handler<ProtonConnection> disconnectHandler = failedCon -> disconnectHandlerInvocation.complete();
+        client.connect(new ProtonClientOptions().setReconnectAttempts(1), attempt -> {}, disconnectHandler);
+
+        // WHEN the peer closes the connection
+        connectionFactory.getCloseHandler().handle(Future.failedFuture("shutting down for maintenance"));
+
+        // THEN the client invokes the disconnect handler provided in the original connect method call
+        disconnectHandlerInvocation.await(500);
     }
 
     private class DisconnectHandlerProvidingConnectionFactory implements ConnectionFactory {
 
         private Handler<ProtonConnection> disconnectHandler;
-        private CountDownLatch expectedConnectionAttemps;
+        private Handler<AsyncResult<ProtonConnection>> closeHandler;
+        private CountDownLatch expectedSucceedingConnectionAttemps;
+        private CountDownLatch expectedFailingConnectionAttempts;
         private ProtonConnection connectionToCreate;
 
         public DisconnectHandlerProvidingConnectionFactory(final ProtonConnection conToCreate) {
             this(conToCreate, 1);
         }
 
-        public DisconnectHandlerProvidingConnectionFactory(final ProtonConnection conToCreate, final int expectedConnectionAttempts) {
+        public DisconnectHandlerProvidingConnectionFactory(final ProtonConnection conToCreate, final int expectedSucceedingConnectionAttempts) {
+            this(conToCreate, expectedSucceedingConnectionAttempts, 0);
+        }
+
+        public DisconnectHandlerProvidingConnectionFactory(final ProtonConnection conToCreate, final int expectedSucceedingConnectionAttempts,
+                final int expectedFailingConnectionAttempts) {
             this.connectionToCreate = conToCreate;
-            this.expectedConnectionAttemps = new CountDownLatch(expectedConnectionAttempts);
+            this.expectedSucceedingConnectionAttemps = new CountDownLatch(expectedSucceedingConnectionAttempts);
+            this.expectedFailingConnectionAttempts = new CountDownLatch(expectedFailingConnectionAttempts);
         }
 
         @Override
@@ -269,11 +353,13 @@ public class HonoClientImplTest {
                 final Handler<ProtonConnection> disconnectHandler,
                 final Handler<AsyncResult<ProtonConnection>> connectionResultHandler) {
 
-            expectedConnectionAttemps.countDown();
+            this.closeHandler = closeHandler;
             this.disconnectHandler = disconnectHandler;
-            if (connectionToCreate == null) {
+            if (expectedFailingConnectionAttempts.getCount() > 0) {
+                expectedFailingConnectionAttempts.countDown();
                 connectionResultHandler.handle(Future.failedFuture("cannot connect"));
             } else {
+                expectedSucceedingConnectionAttemps.countDown();
                 connectionResultHandler.handle(Future.succeededFuture(connectionToCreate));
             }
         }
@@ -302,9 +388,13 @@ public class HonoClientImplTest {
             return disconnectHandler;
         }
 
+        public Handler<AsyncResult<ProtonConnection>> getCloseHandler() {
+            return closeHandler;
+        }
+
         public boolean await(long timeout, TimeUnit unit) {
             try {
-                return expectedConnectionAttemps.await(timeout, unit);
+                return expectedSucceedingConnectionAttemps.await(timeout, unit);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 return false;

@@ -1,4 +1,10 @@
 #!/bin/bash
+
+#
+# For the time being, we are NOT using this script to build Hono anymore
+# instead, we are simply invoking mvn install ... from .travis.yml
+#
+
 # Abort on Error
 set -e
 
@@ -32,8 +38,6 @@ then
   bash target/qpid-dispatch/build-qpid-dispatch-image.sh
   cd $TRAVIS_BUILD_DIR
 fi
-
-docker version
 
 mvn install -DcreateJavadoc=true -Pbuild-docker-image,run-tests >> $BUILD_OUTPUT 2>&1
 

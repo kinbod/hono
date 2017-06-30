@@ -117,7 +117,7 @@ public final class HonoClientImpl implements HonoClient {
         Map<String, Object> result = new HashMap<>();
         result.put("name", connectionFactory.getName());
         result.put("connected", isConnected());
-        result.put("Hono server", String.format("%s:%d", connectionFactory.getHost(), connectionFactory.getPort()));
+        result.put("server", String.format("%s:%d", connectionFactory.getHost(), connectionFactory.getPort()));
         result.put("#regClients", activeRegClients.size());
         result.put("senders", getSenderStatus());
         return result;
@@ -168,12 +168,12 @@ public final class HonoClientImpl implements HonoClient {
 
             connectionFactory.connect(
                     clientOptions,
-                    this::onRemoteClose,
+                    remoteClose -> onRemoteClose(remoteClose, disconnectHandler),
                     failedConnection -> onRemoteDisconnect(failedConnection, disconnectHandler),
                     conAttempt -> {
                         connecting.compareAndSet(true, false);
                         if (conAttempt.failed()) {
-                            reconnect(connectionHandler);
+                            reconnect(connectionHandler, disconnectHandler);
                         } else {
                             setConnection(conAttempt.result());
                             setContext(Vertx.currentContext());
@@ -181,12 +181,12 @@ public final class HonoClientImpl implements HonoClient {
                         }
                     });
         } else {
-            LOG.debug("already trying to connect to Hono server ...");
+            LOG.debug("already trying to connect to server ...");
         }
         return this;
     }
 
-    private void reconnect(final Handler<AsyncResult<HonoClient>> connectionHandler) {
+    private void reconnect(final Handler<AsyncResult<HonoClient>> connectionHandler, Handler<ProtonConnection> disconnectHandler) {
 
         if (clientOptions == null || clientOptions.getReconnectAttempts() == 0) {
             connectionHandler.handle(Future.failedFuture("failed to connect"));
@@ -194,19 +194,19 @@ public final class HonoClientImpl implements HonoClient {
             LOG.debug("scheduling re-connect attempt ...");
             // give Vert.x some time to clean up NetClient
             vertx.setTimer(Constants.DEFAULT_RECONNECT_INTERVAL_MILLIS, tid -> {
-                LOG.info("attempting to re-connect to Hono server [{}:{}]", connectionFactory.getHost(), connectionFactory.getPort());
-                connect(clientOptions, connectionHandler);
+                LOG.info("attempting to re-connect to server [{}:{}]", connectionFactory.getHost(), connectionFactory.getPort());
+                connect(clientOptions, connectionHandler, disconnectHandler);
             });
         }
     }
 
-    private void onRemoteClose(final AsyncResult<ProtonConnection> remoteClose) {
+    private void onRemoteClose(final AsyncResult<ProtonConnection> remoteClose, Handler<ProtonConnection> disconnectHandler) {
         if (remoteClose.failed()) {
-            LOG.info("Hono server [{}:{}] closed connection with error condition: {}",
+            LOG.info("remote server [{}:{}] closed connection with error condition: {}",
                     connectionFactory.getHost(), connectionFactory.getPort(), remoteClose.cause().getMessage());
         }
         connection.close();
-        onRemoteDisconnect(connection, null);
+        onRemoteDisconnect(connection, disconnectHandler);
     }
 
     private void onRemoteDisconnect(final ProtonConnection con, final Handler<ProtonConnection> nextHandler) {
@@ -214,7 +214,7 @@ public final class HonoClientImpl implements HonoClient {
         if (con != connection) {
             LOG.warn("cannot handle failure of unknown connection");
         } else {
-            LOG.info("lost connection to Hono server [{}:{}]", connectionFactory.getHost(), connectionFactory.getPort());
+            LOG.info("lost connection to server [{}:{}]", connectionFactory.getHost(), connectionFactory.getPort());
             connection.disconnect();
             activeSenders.clear();
             activeRegClients.clear();
@@ -224,7 +224,7 @@ public final class HonoClientImpl implements HonoClient {
             if (nextHandler != null) {
                 nextHandler.handle(con);
             } else {
-                reconnect(attempt -> {});
+                reconnect(attempt -> {}, failedCon -> onRemoteDisconnect(failedCon, null));
             }
         }
     }
@@ -296,6 +296,8 @@ public final class HonoClientImpl implements HonoClient {
             // register a handler to be notified if the underlying connection to the server fails
             // so that we can fail the result handler passed in
             final Handler<Void> connectionFailureHandler = connectionLost -> {
+                // remove lock so that next attempt to open a sender doesn't fail
+                senderCreationLocks.remove(key);
                 resultHandler.handle(Future.failedFuture("connection to server lost"));
             };
             creationRequests.add(connectionFailureHandler);
@@ -412,7 +414,7 @@ public final class HonoClientImpl implements HonoClient {
 
     private Future<ProtonConnection> checkConnection() {
         if (connection == null || connection.isDisconnected()) {
-            return Future.failedFuture("client is not connected to Hono (yet)");
+            return Future.failedFuture("client is not connected to server (yet)");
         } else {
             return Future.succeededFuture(connection);
         }
@@ -446,7 +448,7 @@ public final class HonoClientImpl implements HonoClient {
 
         Objects.requireNonNull(tenantId);
         if (connection == null || connection.isDisconnected()) {
-            creationHandler.handle(Future.failedFuture("client is not connected to Hono (yet)"));
+            creationHandler.handle(Future.failedFuture("client is not connected to server (yet)"));
         } else {
             // register a handler to be notified if the underlying connection to the server fails
             // so that we can fail the result handler passed in
@@ -493,7 +495,7 @@ public final class HonoClientImpl implements HonoClient {
         Objects.requireNonNull(tenantId);
         Objects.requireNonNull(creationHandler);
         if (connection == null || connection.isDisconnected()) {
-            creationHandler.handle(Future.failedFuture("client is not connected to Hono (yet)"));
+            creationHandler.handle(Future.failedFuture("client is not connected to server (yet)"));
         } else {
             // register a handler to be notified if the underlying connection to the server fails
             // so that we can fail the result handler passed in

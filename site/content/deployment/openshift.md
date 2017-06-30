@@ -44,8 +44,8 @@ $ oc new-project hono
 
 ### Preparing persistent volume
 
-In order to handle the device registry and preserve the related file when pods go down for any reason (i.e. manual scale down to zero instances, crash, ...),
-a persistent volume is needed so that can be used, through a _claim_, by the Hono Server component. In general, the persistent volume is deployed by the cluster
+In order to handle the Device Registry and preserve the related file when pods go down for any reason (i.e. manual scale down to zero instances, crash, ...),
+a persistent volume is needed so that can be used, through a _claim_, by the Device Registry. In general, the persistent volume is deployed by the cluster
 administrator but for development purposes, a local `/tmp/hono` directory can be used on your _local_ host but it needs to be created with read/write permissions in the following way :
 
 ~~~sh
@@ -57,7 +57,7 @@ After that, it's needed to log into the cluster as a system administrator in ord
 
 ~~~sh
 $ oc login -u system:admin
-$ oc create -f <path-to-repo>/hono/application/target/fabric8/hono-app-pv.yml
+$ oc create -f <path-to-repo>/example/target/classes/META-INF/fabric8/openshift/hono-pv.yml
 ~~~
 
 When the persistent volume is provisioned, come back to use the default `developer` user.
@@ -68,43 +68,71 @@ $ oc login -u developer
 
 ### Deploying Eclipse Hono components
 
-Using the `developer` user, it's now possible to deploy all the other OpenShift resources related to :
+Using the `developer` user, it is now possible to deploy all the other OpenShift resources related to:
 
-* Qpid Dispatch Router (service and deployment)
-* Hono Server (persistent volume claim, service and deployment)
-* HTTP REST adapter (service and deployment)
-* MQTT adapter (service and deployment)
+1. Artemis Broker
+1. Qpid Dispatch Router
+1. Auth Server
+1. Device Registry
+1. Hono Messaging
+1. HTTP REST adapter
+1. MQTT adapter
 
-In order to start deploy the Qpid Dispath Router, the following resources needs to be created.
+Deploy the Artemis Broker:
 
 ~~~sh
-$ oc create -f <path-to-repo>/hono/dispatchrouter/target/fabric8/dispatch-router-svc.yml
-$ oc create -f <path-to-repo>/hono/dispatchrouter/target/fabric8/dispatch-router-dc.yml
+$ oc create -f <path-to-repo>/hono/broker/target/classes/META-INF/fabric8/openshift.yml
 ~~~
 
-Then the Hono Server, which needs a _claim_ on the persistent volume already provisioned other than a _deployment_ and _service_.
+Then the Qpid Dispatch Router:
 
 ~~~sh
-$ oc create -f <path-to-repo>/hono/application/target/fabric8/hono-app-pvc.yml
-$ oc create -f <path-to-repo>/hono/application/target/fabric8/hono-app-svc.yml
-$ oc create -f <path-to-repo>/hono/application/target/fabric8/hono-app-dc.yml
+$ oc create -f <path-to-repo>/hono/dispatchrouter/target/classes/META-INF/fabric8/openshift.yml
+~~~
+
+Then the Auth Server:
+
+~~~sh
+$ oc create -f <path-to-repo>/hono/services/auth/target/classes/META-INF/fabric8/openshift.yml
+~~~
+
+Then the Device Registry:
+
+~~~sh
+$ oc create -f <path-to-repo>/hono/services/device-registry/target/classes/META-INF/fabric8/openshift.yml
+~~~
+
+Then the Hono Messaging component:
+
+~~~sh
+$ oc create -f <path-to-repo>/hono/services/messaging/target/classes/META-INF/fabric8/openshift.yml
 ~~~
 
 Finally, both the adapters (HTTP REST and MQTT).
 
 ~~~sh
-$ oc create -f <path-to-repo>/hono/adapters/rest-vertx/target/fabric8/hono-adapter-rest-vertx-svc.yml
-$ oc create -f <path-to-repo>/hono/adapters/rest-vertx/target/fabric8/hono-adapter-rest-vertx-dc.yml
-$ oc create -f <path-to-repo>/hono/adapters/mqtt-vertx/target/fabric8/hono-adapter-mqtt-vertx-svc.yml
-$ oc create -f <path-to-repo>/hono/adapters/mqtt-vertx/target/fabric8/hono-adapter-mqtt-vertx-dc.yml
+$ oc create -f <path-to-repo>/hono/adapters/rest-vertx/target/classes/META-INF/fabric8/openshift.yml
+$ oc create -f <path-to-repo>/hono/adapters/mqtt-vertx/target/classes/META-INF/fabric8/openshift.yml
 ~~~
 
-In this way, all the components are accessible inside the cluster using the _service_ addresses from the clients point of view.
+In this way, all the components are accessible inside the cluster using the _service_ addresses from a client's point of view.
 
-In order to see the deployed components, you can use the OpenShift Web console that is accessible at https://localhost:8443/ using your preferred browser.
+In order to see the deployed components, you can use the [OpenShift Web console](https://localhost:8443/) using your preferred browser.
 
 In the following pictures an Eclipse Hono deployment on OpenShift is running with all the provided components.
 
 ![Eclipse Hono on Openshift](../openshift_01.png)
 
 ![Eclipse Hono on Openshift](../openshift_02.png)
+
+![Eclipse Hono on Openshift](../openshift_03.png)
+
+![Eclipse Hono on Openshift](../openshift_04.png)
+
+![Eclipse Hono on Openshift](../openshift_05.png)
+
+![Eclipse Hono on Openshift](../openshift_06.png)
+
+![Eclipse Hono on Openshift](../openshift_07.png)
+
+![Eclipse Hono on Openshift](../openshift_08.png)

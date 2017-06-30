@@ -20,7 +20,7 @@ In order to enable *Swarm Mode* on your *Docker Engine* run the following comman
 Please refer to the [Docker Swarm Mode documentation](https://docs.docker.com/engine/swarm/swarm-mode/) for details.
 
 {{% warning %}}
-You will need at least Docker version 1.13.0 in order to run the example in this guide. By the time of writing, the latest released version of Docker was 1.13.1.
+You will need at least Docker Engine version 1.13.1 in order to run the example in this guide. By the time of writing, the latest released version of Docker was 17.06.0.
 {{% /warning %}}
 
 ### Compiling
@@ -35,6 +35,10 @@ with `${host}` and `${port}` reflecting the name/IP address and port of the host
 
 If you plan to build the Docker images more frequently, e.g. because you want to extend or improve the Hono code, then you should define the `docker.host` property in your Maven `settings.xml` file containing the very same value as you would use on the command line as indicated above. This way you can simply do a `mvn clean install` later on and the Docker images will be built automatically as well because the `build-docker-image` profile is activated automatically if the Maven property `docker.host` is set.
 
+{{% note %}}
+The first build might take several minutes because Docker will need to download all the base images that Hono is relying on. However, most of these will be cached by Docker so that subsequent builds will be running much faster.
+{{% /note %}}
+
 ## Starting Hono
 
 The easiest way to start the server components is by deploying them as a *stack*. As part of the build process, a *Docker Compose* file is generated under `example/target/hono/docker-compose.yml` which can be used to start up a Hono instance on your Docker host. Simply run the following from the `example/target/hono` directory
@@ -48,17 +52,17 @@ This will create and start up Docker Swarm *services* for all components that to
 {{< figure src="../Hono_instance.svg" title="Hono instance containers">}}
 
 * Hono Instance
-  * A *Hono Server* instance that protocol adapters connect to in order to forward data from devices.
-  * A *REST Adapter* instance that exposes Hono's Telemetry API as RESTful resources.
-  * An *MQTT Adapter* instance that exposes Hono's Telemetry API as an MQTT topic hierarchy.
+  * A *Hono Messaging* instance that protocol adapters connect to in order to forward data from devices.
+  * A *REST Adapter* instance that exposes Hono's Telemetry and Event APIs as RESTful resources.
+  * An *MQTT Adapter* instance that exposes Hono's Telemetry and Event APIs as an MQTT topic hierarchy.
   * A *Device Registry* instance that manages device data and is used for token assertion.
   * An *Auth Server* instance that authenticates Hono components and delivers authorization tokens.  
 * AMQP Network
-  * A *Dispatch Router* instance that downstream clients connect to in order to consume telemetry data.
-  * An *Artemis* instance that is the default persistence store for events.
+  * A *Dispatch Router* instance that downstream clients connect to in order to consume telemetry data and events from devices.
+  * An *Artemis* instance serving as the persistence store for events.
 * Monitoring Infrastructure
   * An *InfluxDB* instance to store metrics data from the Hono Server.
-  * A *Grafana* instance to show a default dashboard with the Hono Server metrics.
+  * A *Grafana* instance providing a dashboard visualizing metrics collected from Hono components.
  
 ## Starting a Consumer
 
@@ -67,7 +71,7 @@ In this example we will use a simple command line client that logs all telemetry
 You can start the client from the `example` folder as follows:
 
 ~~~sh
-~/hono/example$ mvn spring-boot:run -Drun.arguments=--hono.client.host=localhost,--hono.client.username=user1@HONO,--hono.client.password=pw
+~/hono/example$ mvn spring-boot:run -Drun.arguments=--hono.client.host=localhost,--hono.client.username=consumer@HONO,--hono.client.password=verysecret
 ~~~
 
 Event messages are very similar to telemetry ones, except that they use `AT LEAST ONCE` quality of service. You can receive and log event messages uploaded to Hono using the same client.
@@ -75,7 +79,7 @@ Event messages are very similar to telemetry ones, except that they use `AT LEAS
 In order to do so, run the client from the `example` folder as follows:
 
 ~~~sh
-mvn spring-boot:run -Drun.arguments=--hono.client.host=localhost,--hono.client.username=user1@HONO,--hono.client.password=pw -Drun.profiles=receiver,ssl,event
+mvn spring-boot:run -Drun.arguments=--hono.client.host=localhost,--hono.client.username=consumer@HONO,--hono.client.password=verysecret -Drun.profiles=receiver,ssl,event
 ~~~
 
 {{% warning %}}
@@ -219,8 +223,8 @@ In order to start up the instance again:
 
 ## View metrics
 
-Open the [Grafana dashboard](http://localhost:3000/dashboard/db/hono?orgId=1) in a browser. Login is `admin/admin`.
+Open the [Grafana dashboard](http://localhost:3000/dashboard/db/hono?orgId=1) in a browser using `admin/admin` as login credentials.
 
 {{% warning %}}
-If you do not run Docker on localhost, replace *localhost* in the link with the correct name or IP address of the host that Docker is running on.
+If you do not run Docker on localhost, replace *localhost* in the link with the correct name or IP address of the Docker host that the Grafana container is running on.
 {{% /warning %}}

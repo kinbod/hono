@@ -14,6 +14,7 @@ package org.eclipse.hono.service;
 import java.net.HttpURLConnection;
 import java.util.Objects;
 
+import io.vertx.proton.ProtonConnection;
 import org.eclipse.hono.client.HonoClient;
 import org.eclipse.hono.client.MessageSender;
 import org.eclipse.hono.client.RegistrationClient;
@@ -33,46 +34,44 @@ import io.vertx.proton.ProtonClientOptions;
 /**
  * A base class for implementing protocol adapters.
  * <p>
- * Provides connections to device registration and telemetry and event endpoints.
+ * Provides connections to device registration and telemetry and event service endpoints.
  * 
  * @param <T> The type of configuration properties used by this service.
  */
 public abstract class AbstractProtocolAdapterBase<T extends ServiceConfigProperties> extends AbstractServiceBase<T> {
 
-    private HonoClient hono;
+    private HonoClient messaging;
     private HonoClient registration;
 
     /**
-     * Sets the client to use for connecting to the Hono server.
+     * Sets the client to use for connecting to the Hono Messaging component.
      * 
      * @param honoClient The client.
      * @throws NullPointerException if hono client is {@code null}.
      */
+    @Qualifier(Constants.QUALIFIER_MESSAGING)
     @Autowired
-    public final void setHonoClient(final HonoClient honoClient) {
-        this.hono = Objects.requireNonNull(honoClient);
+    public final void setHonoMessagingClient(final HonoClient honoClient) {
+        this.messaging = Objects.requireNonNull(honoClient);
     }
 
     /**
-     * Gets the client used for connecting to the Hono server.
+     * Gets the client used for connecting to the Hono Messaging component.
      * 
      * @return The client.
      */
-    public final HonoClient getHonoClient() {
-        return hono;
+    public final HonoClient getHonoMessagingClient() {
+        return messaging;
     }
 
     /**
      * Sets the client to use for connecting to the Device Registration service.
-     * <p>
-     * If this property is not set then the Device Registration endpoint is assumed
-     * to be exposed by the Hono server as well.
      * 
      * @param registrationServiceClient The client.
      * @throws NullPointerException if the client is {@code null}.
      */
     @Qualifier(RegistrationConstants.REGISTRATION_ENDPOINT)
-    @Autowired(required = false)
+    @Autowired
     public final void setRegistrationServiceClient(final HonoClient registrationServiceClient) {
         this.registration = Objects.requireNonNull(registrationServiceClient);
     }
@@ -83,16 +82,15 @@ public abstract class AbstractProtocolAdapterBase<T extends ServiceConfigPropert
      * @return The client.
      */
     public final HonoClient getRegistrationServiceClient() {
-        if (registration == null) {
-            return hono;
-        }
         return registration;
     }
 
     @Override
     public final void start(final Future<Void> startFuture) {
-        if (hono == null) {
-            startFuture.fail("Hono client must be set");
+        if (messaging == null) {
+            startFuture.fail("Hono Messaging client must be set");
+        } else if (registration == null) {
+            startFuture.fail("Registration client must be set");
         } else {
             doStart(startFuture);
         }
@@ -128,55 +126,71 @@ public abstract class AbstractProtocolAdapterBase<T extends ServiceConfigPropert
     }
 
     /**
-     * Connects to the Hono server using the configured client.
+     * Connects to the Hono Messaging component using the configured client.
      * 
      * @param connectHandler The handler to invoke with the outcome of the connection attempt.
      *                       If {@code null} and the connection attempt failed, this method
      *                       tries to re-connect until a connection is established.
      */
-    protected final void connectToHono(final Handler<AsyncResult<HonoClient>> connectHandler) {
+    protected final void connectToMessaging(final Handler<AsyncResult<HonoClient>> connectHandler) {
 
-        if (hono == null) {
+        if (messaging == null) {
             if (connectHandler != null) {
-                connectHandler.handle(Future.failedFuture("Hono client not set"));
+                connectHandler.handle(Future.failedFuture("Hono Messaging client not set"));
             }
-        } else if (hono.isConnected()) {
-            LOG.debug("already connected to Hono server");
+        } else if (messaging.isConnected()) {
+            LOG.debug("already connected to Hono Messaging");
             if (connectHandler != null) {
-                connectHandler.handle(Future.succeededFuture(hono));
+                connectHandler.handle(Future.succeededFuture(messaging));
             }
         } else {
-            hono.connect(createClientOptions(), connectAttempt -> {
+            messaging.connect(createClientOptions(), connectAttempt -> {
                 if (connectHandler != null) {
                     connectHandler.handle(connectAttempt);
                 } else {
-                    LOG.debug("connected to Hono");
+                    LOG.debug("connected to Hono Messaging");
                 }
-            });
+            },
+            this::onDisconnectMessaging
+            );
         }
     }
 
     /**
-     * Connects to the Registration Service using the configured client.
-     * <p>
-     * If the <em>registrationServiceClient</em> is not set, this method connects to the
-     * Hono server instead, assuming that the Registration Service is implemented by the Hono server.
+     * Attempts a reconnect for the Hono Messaging client after {@link Constants#DEFAULT_RECONNECT_INTERVAL_MILLIS} milliseconds.
+     *
+     * @param con The connection that was disonnected.
+     */
+    private void onDisconnectMessaging(final ProtonConnection con) {
+
+        vertx.setTimer(Constants.DEFAULT_RECONNECT_INTERVAL_MILLIS, reconnect -> {
+            LOG.info("attempting to reconnect to Hono Messaging");
+            messaging.connect(createClientOptions(), connectAttempt -> {
+                if (connectAttempt.succeeded()) {
+                    LOG.debug("reconnected to Hono Messaging");
+                } else {
+                    LOG.debug("cannot reconnect to Hono Messaging");
+                }
+            }, this::onDisconnectMessaging
+            );
+        });
+    }
+
+    /**
+     * Connects to the Device Registration service using the configured client.
      * 
      * @param connectHandler The handler to invoke with the outcome of the connection attempt.
      *                       If {@code null} and the connection attempt failed, this method
      *                       tries to re-connect until a connection is established.
      */
-    protected final void connectToRegistration(final Handler<AsyncResult<HonoClient>> connectHandler) {
+    protected final void connectToDeviceRegistration(final Handler<AsyncResult<HonoClient>> connectHandler) {
 
         if (registration == null) {
-            if (hono != null) {
-                // no need to open an additional connection to Hono server
-                LOG.info("using Hono client for accessing Device Registration endpoint");
-            } else if (connectHandler != null) {
+            if (connectHandler != null) {
                 connectHandler.handle(Future.failedFuture("Device Registration client not set"));
             }
         } else if (registration.isConnected()) {
-            LOG.debug("already connected to Registration Service");
+            LOG.debug("already connected to Device Registration service");
             if (connectHandler != null) {
                 connectHandler.handle(Future.succeededFuture(registration));
             }
@@ -185,10 +199,33 @@ public abstract class AbstractProtocolAdapterBase<T extends ServiceConfigPropert
                 if (connectHandler != null) {
                     connectHandler.handle(connectAttempt);
                 } else {
-                    LOG.debug("connected to Registration Service");
+                    LOG.debug("connected to Device Registration service");
                 }
-            });
+            },
+            this::onDisconnectDeviceRegistry
+            );
         }
+    }
+
+    /**
+     * Attempts a reconnect for the Hono Device Registration client after {@link Constants#DEFAULT_RECONNECT_INTERVAL_MILLIS} milliseconds.
+     *
+     * @param con The connection that was disonnected.
+     */
+    private void onDisconnectDeviceRegistry(final ProtonConnection con) {
+
+        vertx.setTimer(Constants.DEFAULT_RECONNECT_INTERVAL_MILLIS, reconnect -> {
+            LOG.info("attempting to reconnect to Device Registration service");
+            registration.connect(createClientOptions(), connectAttempt -> {
+                if (connectAttempt.succeeded()) {
+                    LOG.debug("reconnected to Device Registration service");
+                } else {
+                    LOG.debug("cannot reconnect to Device Registration service");
+                }
+            },
+            this::onDisconnectDeviceRegistry
+            );
+        });
     }
 
     private ProtonClientOptions createClientOptions() {
@@ -204,22 +241,27 @@ public abstract class AbstractProtocolAdapterBase<T extends ServiceConfigPropert
      * @return {@code true} if this adapter is connected.
      */
     protected final boolean isConnected() {
-        boolean result = hono != null && hono.isConnected();
+        boolean result = messaging != null && messaging.isConnected();
         if (registration != null) {
             result &= registration.isConnected();
         }
         return result;
     }
 
+    /**
+     * Closes the connections to the Hono Messaging component and the Device Registration service.
+     * 
+     * @param closeHandler The handler to notify about the result.
+     */
     protected final void closeClients(final Handler<AsyncResult<Void>> closeHandler) {
 
-        Future<Void> honoTracker = Future.future();
+        Future<Void> messagingTracker = Future.future();
         Future<Void> registrationTracker = Future.future();
 
-        if (hono == null) {
-            honoTracker.complete();
+        if (messaging == null) {
+            messagingTracker.complete();
         } else {
-            hono.shutdown(honoTracker.completer());
+            messaging.shutdown(messagingTracker.completer());
         }
 
         if (registration == null) {
@@ -228,7 +270,7 @@ public abstract class AbstractProtocolAdapterBase<T extends ServiceConfigPropert
             registration.shutdown(registrationTracker.completer());
         }
 
-        CompositeFuture.all(honoTracker, registrationTracker).setHandler(s -> {
+        CompositeFuture.all(messagingTracker, registrationTracker).setHandler(s -> {
             if (closeHandler != null) {
                 if (s.succeeded()) {
                     closeHandler.handle(Future.succeededFuture());
@@ -239,24 +281,49 @@ public abstract class AbstractProtocolAdapterBase<T extends ServiceConfigPropert
         });
     }
 
+    /**
+     * Gets a client for sending telemetry data for a tenant.
+     * 
+     * @param tenantId The tenant to send the telemetry data for.
+     * @return The client.
+     */
     protected final Future<MessageSender> getTelemetrySender(final String tenantId) {
         Future<MessageSender> result = Future.future();
-        hono.getOrCreateTelemetrySender(tenantId, result.completer());
+        messaging.getOrCreateTelemetrySender(tenantId, result.completer());
         return result;
     }
 
+    /**
+     * Gets a client for sending events for a tenant.
+     * 
+     * @param tenantId The tenant to send the events for.
+     * @return The client.
+     */
     protected final Future<MessageSender> getEventSender(final String tenantId) {
         Future<MessageSender> result = Future.future();
-        hono.getOrCreateEventSender(tenantId, result.completer());
+        messaging.getOrCreateEventSender(tenantId, result.completer());
         return result;
     }
 
+    /**
+     * Gets a client for interacting with the Device Registration service.
+     * 
+     * @param tenantId The tenant that the client is scoped to.
+     * @return The client.
+     */
     protected final Future<RegistrationClient> getRegistrationClient(final String tenantId) {
         Future<RegistrationClient> result = Future.future();
         getRegistrationServiceClient().getOrCreateRegistrationClient(tenantId, result.completer());
         return result;
     }
 
+    /**
+     * Gets a registration status assertion for a device.
+     * 
+     * @param tenantId The tenant that the device belongs to.
+     * @param deviceId The device to get the assertion for.
+     * @return The assertion.
+     */
     protected final Future<String> getRegistrationAssertion(final String tenantId, final String deviceId) {
         Future<String> result = Future.future();
         getRegistrationClient(tenantId).compose(client -> {
@@ -272,5 +339,4 @@ public abstract class AbstractProtocolAdapterBase<T extends ServiceConfigPropert
         }, result);
         return result;
     }
-
 }

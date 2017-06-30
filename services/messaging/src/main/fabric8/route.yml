@@ -1,0 +1,8 @@
+spec:
+  to:
+    kind: Service
+    name: ${project.artifactId}
+  port:
+    targetPort: amqps
+  tls:
+    termination: passthrough

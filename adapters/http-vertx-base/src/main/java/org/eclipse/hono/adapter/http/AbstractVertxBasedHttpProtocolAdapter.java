@@ -171,8 +171,8 @@ public abstract class AbstractVertxBasedHttpProtocolAdapter<T extends ServiceCon
                 }
             })
             .compose(s -> {
-                connectToHono(null);
-                connectToRegistration(null);
+                connectToMessaging(null);
+                connectToDeviceRegistration(null);
                 try {
                     onStartupSuccess();
                     startFuture.complete();
@@ -500,9 +500,9 @@ public abstract class AbstractVertxBasedHttpProtocolAdapter<T extends ServiceCon
     }
 
     private void doGetStatus(final RoutingContext ctx) {
-        JsonObject result = new JsonObject(getHonoClient().getConnectionStatus());
+        JsonObject result = new JsonObject(getHonoMessagingClient().getConnectionStatus());
         result.put("active profiles", activeProfiles);
-        result.put("senders", getHonoClient().getSenderStatus());
+        result.put("senders", getHonoMessagingClient().getSenderStatus());
         adaptStatusResource(result);
         ctx.response()
             .putHeader(HttpHeaders.CONTENT_TYPE, CONTENT_TYPE_JSON)

@@ -33,6 +33,7 @@
     <assertj-core.version>3.2.0</assertj-core.version>
     <dropwizard-metrics.version>3.2.2</dropwizard-metrics.version>
     <grafana.version>4.2.0</grafana.version>
+    <influxdb.version>1.2.2</influxdb.version>
     <jackson.version>2.7.4</jackson.version>
     <java-base-image.name>openjdk:8-jre-alpine</java-base-image.name>
     <jjwt.version>0.7.0</jjwt.version>
@@ -101,6 +102,12 @@
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-actuator</artifactId>
         <version>${spring-boot.version}</version>
+        <exclusions>
+          <exclusion>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+          </exclusion>
+        </exclusions>
       </dependency>
       <dependency>
         <groupId>io.dropwizard.metrics</groupId>
@@ -180,10 +187,16 @@
         <scope>test</scope>
       </dependency>
       <dependency>
-       <groupId>io.vertx</groupId>
-       <artifactId>vertx-unit</artifactId>
-       <version>${vertx.version}</version>
-       <scope>test</scope>
+        <groupId>io.vertx</groupId>
+        <artifactId>vertx-unit</artifactId>
+        <version>${vertx.version}</version>
+        <scope>test</scope>
+        <exclusions>
+          <exclusion>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+          </exclusion>
+        </exclusions>
       </dependency>
       <dependency>
         <groupId>org.mockito</groupId>
