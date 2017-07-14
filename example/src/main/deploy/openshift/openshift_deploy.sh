@@ -1,16 +1,23 @@
 #!/bin/sh
 
+# Copyright (c) 2017 Red Hat and others.
+#
+# All rights reserved. This program and the accompanying materials
+# are made available under the terms of the Eclipse Public License v1.0
+# which accompanies this distribution, and is available at
+# http://www.eclipse.org/legal/epl-v10.html
+#
+# Contributors:
+#    Red Hat - initial creation
+#    Bosch Software Innovations GmbH
 
 # Absolute path this script is in
 SCRIPTPATH="$(cd "$(dirname "$0")" && pwd -P)"
-HONO_HOME=$SCRIPTPATH/../..
+CONFIG=$SCRIPTPATH/../../config
+CERTS=$CONFIG/hono-demo-certs-jar
+HONO_HOME=$SCRIPTPATH/../../../..
 
 echo DEPLOYING ECLIPSE HONO ON OPENSHIFT
-
-oc login -u developer -n hono
-
-# creating new project
-oc new-project hono --description="Open source IoT connectivity" --display-name="Eclipse Hono"
 
 # creating the directory for Hono Server persistent volume
 if [ ! -d /tmp/hono ]; then
@@ -21,12 +28,15 @@ else
 fi
 
 # creating Hono persistent volume (admin needed)
-oc login -u system:admin -n hono
-oc create -f $HONO_HOME/example/target/classes/META-INF/fabric8/openshift/hono-pv.yml
+oc login -u system:admin
+oc create -f $SCRIPTPATH/hono-pv.yml
+
+oc login -u developer
+
+# creating new project
+oc new-project hono --description="Open source IoT connectivity" --display-name="Eclipse Hono"
 
 # starting to deploy Eclipse Hono (developer user)
-oc login -u developer -n hono
-
 echo
 echo Deploying Grafana ...
 oc create -f $HONO_HOME/metrics/target/classes/META-INF/fabric8/openshift.yml
@@ -37,7 +47,14 @@ oc create -f $HONO_HOME/broker/target/classes/META-INF/fabric8/openshift.yml
 echo ... done
 
 echo Deploying Qpid Dispatch Router ...
-oc create -f $HONO_HOME/dispatchrouter/target/classes/META-INF/fabric8/openshift.yml
+oc create secret generic hono-dispatch-router-conf \
+  --from-file=$CERTS/qdrouter-key.pem \
+  --from-file=$CERTS/qdrouter-cert.pem \
+  --from-file=$CERTS/trusted-certs.pem \
+  --from-file=$CONFIG/hono-dispatch-router-jar/qpid/qdrouterd-with-broker.json \
+  --from-file=$CONFIG/hono-dispatch-router-jar/sasl/qdrouter-sasl.conf \
+  --from-file=$CONFIG/hono-dispatch-router-jar/sasl/qdrouterd.sasldb
+oc create -f $CONFIG/hono-dispatch-router-jar/META-INF/fabric8/openshift.yml
 echo ... done
 
 echo Deploying Authentication Server ...

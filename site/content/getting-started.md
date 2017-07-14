@@ -41,29 +41,38 @@ The first build might take several minutes because Docker will need to download 
 
 ## Starting Hono
 
-The easiest way to start the server components is by deploying them as a *stack*. As part of the build process, a *Docker Compose* file is generated under `example/target/hono/docker-compose.yml` which can be used to start up a Hono instance on your Docker host. Simply run the following from the `example/target/hono` directory
+As part of the build process, a set of scripts for deploying and undeploying Hono to/from a Docker Swarm is generated in the `example/target/deploy/docker` folder.
+To deploy and start Hono simply run the following from the `example/target/deploy/docker` directory
 
 ~~~sh
-~/hono/example/target/hono$ docker stack deploy -c docker-compose.yml hono
+~/hono/example/target/deploy/docker$ chmod +x swarm_*.sh
+~/hono/example/target/deploy/docker$ ./swarm_deploy.sh
 ~~~
 
-This will create and start up Docker Swarm *services* for all components that together comprise a Hono instance, in particular the following services are started:
+The first command makes the generated scripts executable. This needs to be done once after each build.
+The second command creates and starts up Docker Swarm *services* for all components that together comprise a Hono instance, in particular the following services are started:
 
 {{< figure src="../Hono_instance.svg" title="Hono instance containers">}}
 
 * Hono Instance
-  * A *Hono Messaging* instance that protocol adapters connect to in order to forward data from devices.
   * A *REST Adapter* instance that exposes Hono's Telemetry and Event APIs as RESTful resources.
   * An *MQTT Adapter* instance that exposes Hono's Telemetry and Event APIs as an MQTT topic hierarchy.
-  * A *Device Registry* instance that manages device data and is used for token assertion.
-  * An *Auth Server* instance that authenticates Hono components and delivers authorization tokens.  
+  * A *Hono Messaging* instance that protocol adapters connect to in order to forward data from devices.
+  * A *Device Registry* instance that manages device data and issues device registration assertions to protocol adapters.
+  * An *Auth Server* instance that authenticates Hono components and issues tokens asserting identity and authorities.
 * AMQP Network
   * A *Dispatch Router* instance that downstream clients connect to in order to consume telemetry data and events from devices.
   * An *Artemis* instance serving as the persistence store for events.
 * Monitoring Infrastructure
-  * An *InfluxDB* instance to store metrics data from the Hono Server.
-  * A *Grafana* instance providing a dashboard visualizing metrics collected from Hono components.
- 
+  * An *InfluxDB* instance for storing metrics data from the Hono Messaging component.
+  * A *Grafana* instance providing a dash board visualizing the collected metrics data.
+
+You can list all services by executing
+
+~~~sh
+~/hono/example/target/deploy/docker$ docker service ls
+~~~
+
 ## Starting a Consumer
 
 The telemetry data produced by devices is usually consumed by downstream applications that use it to implement their corresponding business functionality.
@@ -172,7 +181,7 @@ Content-Type: text/plain
 resource limit exceeded, please try again later
 ~~~
 
-This is because the first request to publish data for a tenant (`DEFAULT_TENANT` in the example) is used as the trigger to establish a tenant specific link with the Hono server to forward the data over. However, the REST adapter may not receive credits from the Hono Server quickly enough for the request to be served successfully.
+This is because the first request to publish data for a tenant (`DEFAULT_TENANT` in the example) is used as the trigger to establish a tenant specific link with the Hono Messaging component to forward the data over. However, the REST adapter may not receive credits from Hono Messaging quickly enough for the request to be served successfully.
 You can simply ignore this response and re-submit the command. You should then get a response like this:
 
 ~~~
@@ -184,7 +193,7 @@ Hono-Reg-Assertion: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiI0NzExIiwidGVuIjoiREVGQVVMVF9
 
 If you have started the consumer as described above, you should now see the telemetry message being logged to the console. You can publish more data simply by issuing additional requests.
 
-If you haven't started a consumer you will continue to get `503 Resource Unavailable` responses because Hono does not accept any telemetry data from devices if there aren't any consumers connected that are interested in the data. Telemetry data is never persisted within Hono, thus it doesn't make any sense to accept and process telemetry data if there is no destination to deliver it to.
+If you haven't started a consumer you will continue to get `503 Resource Unavailable` responses because Hono does not accept any telemetry data from devices if there aren't any consumers connected that are interested in the data. Telemetry data is *never* persisted within Hono, thus it doesn't make any sense to accept and process telemetry data if there is no consumer to deliver it to.
 
 Please refer to the [REST Adapter documentation]({{< relref "rest-adapter.md" >}}) for additional information and examples for interacting with Hono via HTTP.
 
@@ -208,17 +217,17 @@ $ http PUT http://localhost:8080/event/DEFAULT_TENANT/4711 temp:=5
 The Hono instance's services can be stopped and removed using the following command:
 
 ~~~sh
-~/hono/example/target/hono$ docker stack rm hono
+~/hono/example/target/hono$ ./swarm_undeploy.sh
 ~~~
 
-Please refer to the [Docker Swarm documentation](https://docs.docker.com/engine/swarm/services/) for details regarding the management of services.
+Please refer to the [Docker Swarm documentation](https://docs.docker.com/engine/swarm/services/) for details regarding the management of individual services.
 
 ## Restarting
 
 In order to start up the instance again:
 
 ~~~sh
-~/hono/example/target/hono$ docker stack deploy -c docker-compose.yml hono
+~/hono/example/target/hono$ ./swarm_deploy.sh
 ~~~
 
 ## View metrics
@@ -228,3 +237,6 @@ Open the [Grafana dashboard](http://localhost:3000/dashboard/db/hono?orgId=1) in
 {{% warning %}}
 If you do not run Docker on localhost, replace *localhost* in the link with the correct name or IP address of the Docker host that the Grafana container is running on.
 {{% /warning %}}
+
+If there are more than one instance of the Hono Messaging component, the data shown in the Grafana board is not accurate, since the data is not aggregated over instances at the moment. 
+For a productive environment the instance need to be considered - e.g. by setting a different `hono.metric.reporter.graphite.prefix` for each instance and an aggregation function in the visualization.

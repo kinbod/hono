@@ -29,6 +29,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 
 import io.vertx.core.CompositeFuture;
 import io.vertx.core.Future;
+import io.vertx.ext.healthchecks.HealthCheckHandler;
 import io.vertx.proton.ProtonConnection;
 import io.vertx.proton.ProtonHelper;
 import io.vertx.proton.ProtonLink;
@@ -123,6 +124,15 @@ public abstract class AmqpServiceBase<T extends ServiceConfigProperties> extends
     }
 
     /**
+     * Iterates over the endpoints registered with this service.
+     * 
+     * @return The endpoints.
+     */
+    protected final Iterable<Endpoint> endpoints() {
+        return endpoints.values();
+    }
+
+    /**
      * Sets the factory to use for creating objects performing SASL based authentication of clients.
      *
      * @param factory The factory.
@@ -153,18 +163,16 @@ public abstract class AmqpServiceBase<T extends ServiceConfigProperties> extends
     }
 
     @Override
-    public void start(final Future<Void> startupHandler) {
+    public Future<Void> startInternal() {
 
         if (authorizationService == null) {
             authorizationService = new ClaimsBasedAuthorizationService();
         }
-        preStartServers()
+        return preStartServers()
             .compose(s -> checkPortConfiguration())
             .compose(s -> startEndpoints())
             .compose(s -> startSecureServer())
-            .compose(s -> startInsecureServer())
-            .compose(s -> startupHandler.complete(), startupHandler);
-
+            .compose(s -> startInsecureServer());
     }
 
     /**
@@ -297,8 +305,9 @@ public abstract class AmqpServiceBase<T extends ServiceConfigProperties> extends
     }
 
     @Override
-    public final void stop(Future<Void> shutdownHandler) {
+    public final Future<Void> stopInternal() {
 
+        Future<Void> shutdownHandler = Future.future();
         Future<Void> tracker = Future.future();
         if (server != null) {
             server.close(tracker.completer());
@@ -313,28 +322,17 @@ public abstract class AmqpServiceBase<T extends ServiceConfigProperties> extends
                 shutdownHandler.complete();
             }
         }, shutdownHandler);
+        return shutdownHandler;
     }
 
     @Override
-    public final int getPort() {
-        if (server != null) {
-            return server.actualPort();
-        } else if (isSecurePortEnabled()) {
-            return getConfig().getPort(getPortDefaultValue());
-        } else {
-            return Constants.PORT_UNCONFIGURED;
-        }
+    protected final int getActualPort() {
+        return (server != null ? server.actualPort() : Constants.PORT_UNCONFIGURED);
     }
 
     @Override
-    public final int getInsecurePort() {
-        if (insecureServer != null) {
-            return insecureServer.actualPort();
-        } else if (isInsecurePortEnabled()) {
-            return getConfig().getInsecurePort(getInsecurePortDefaultValue());
-        } else {
-            return Constants.PORT_UNCONFIGURED;
-        }
+    protected final int getActualInsecurePort() {
+        return (insecureServer != null ? insecureServer.actualPort() : Constants.PORT_UNCONFIGURED);
     }
 
     /**
@@ -384,6 +382,42 @@ public abstract class AmqpServiceBase<T extends ServiceConfigProperties> extends
             return ResourceIdentifier.fromStringAssumingDefaultTenant(address);
         } else {
             return ResourceIdentifier.fromString(address);
+        }
+    }
+
+
+    /**
+     * Registers this service's endpoints' readiness checks.
+     * <p>
+     * This default implementation invokes {@link Endpoint#registerReadinessChecks(HealthCheckHandler)}
+     * for all registered endpoints.
+     * <p>
+     * Subclasses should override this method to register more specific checks.
+     * 
+     * @param handler The health check handler to register the checks with.
+     */
+    @Override
+    public void registerReadinessChecks(final HealthCheckHandler handler) {
+
+        for (Endpoint ep : endpoints()) {
+            ep.registerReadinessChecks(handler);
+        }
+    }
+
+    /**
+     * Registers this service's endpoints' liveness checks.
+     * <p>
+     * This default implementation invokes {@link Endpoint#registerLivenessChecks(HealthCheckHandler)}
+     * for all registered endpoints.
+     * <p>
+     * Subclasses should override this method to register more specific checks.
+     * 
+     * @param handler The health check handler to register the checks with.
+     */
+    @Override
+    public void registerLivenessChecks(HealthCheckHandler handler) {
+        for (Endpoint ep : endpoints()) {
+            ep.registerLivenessChecks(handler);
         }
     }
 }
