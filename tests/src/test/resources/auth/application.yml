@@ -1,8 +1,11 @@
 hono:
-  auth:
-    permissionsPath: file:///etc/hono/permissions.json
-    insecurePortEnabled: true
-    insecurePortBindAddress: 0.0.0.0
+  app:
     maxInstances: 1
-    keyPath: /etc/hono/certs/auth-server-key.pem
-    certPath: /etc/hono/certs/auth-server-cert.pem
+  auth:
+    amqp:
+      insecurePortEnabled: true
+      insecurePortBindAddress: 0.0.0.0
+      keyPath: /etc/hono/certs/auth-server-key.pem
+      certPath: /etc/hono/certs/auth-server-cert.pem
+    svc:
+      permissionsPath: file:///etc/hono/permissions.json

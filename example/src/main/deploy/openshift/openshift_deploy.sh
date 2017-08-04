@@ -39,11 +39,11 @@ oc new-project hono --description="Open source IoT connectivity" --display-name=
 # starting to deploy Eclipse Hono (developer user)
 echo
 echo Deploying Grafana ...
-oc create -f $HONO_HOME/metrics/target/classes/META-INF/fabric8/openshift.yml
+oc create -f $CONFIG/hono-metrics-jar/META-INF/fabric8/openshift.yml
 echo ... done
 
 echo Deploying Apache ActiveMQ Artemis Broker ...
-oc create -f $HONO_HOME/broker/target/classes/META-INF/fabric8/openshift.yml
+oc create -f $CONFIG/hono-artemis-jar/META-INF/fabric8/openshift.yml
 echo ... done
 
 echo Deploying Qpid Dispatch Router ...
@@ -58,23 +58,50 @@ oc create -f $CONFIG/hono-dispatch-router-jar/META-INF/fabric8/openshift.yml
 echo ... done
 
 echo Deploying Authentication Server ...
-oc create -f $HONO_HOME/services/auth/target/classes/META-INF/fabric8/openshift.yml
+oc create secret generic hono-service-auth-conf \
+  --from-file=$CERTS/auth-server-key.pem \
+  --from-file=$CERTS/auth-server-cert.pem \
+  --from-file=$CERTS/trusted-certs.pem \
+  --from-file=application.yml=$CONFIG/hono-service-auth-config.yml
+oc create -f $CONFIG/hono-service-auth-jar/META-INF/fabric8/openshift.yml
 echo ... done
 
 echo Deploying Device Registry ...
-oc create -f $HONO_HOME/services/device-registry/target/classes/META-INF/fabric8/openshift.yml
+oc create secret generic hono-service-device-registry-conf \
+  --from-file=$CERTS/device-registry-key.pem \
+  --from-file=$CERTS/device-registry-cert.pem \
+  --from-file=$CERTS/auth-server-cert.pem \
+  --from-file=$CERTS/trusted-certs.pem \
+  --from-file=application.yml=$CONFIG/hono-service-device-registry-config.yml
+oc create -f $CONFIG/hono-service-device-registry-jar/META-INF/fabric8/openshift.yml
 echo ... done
 
 echo Deploying Hono Messaging ...
-oc create -f $HONO_HOME/services/messaging/target/classes/META-INF/fabric8/openshift.yml
+oc create secret generic hono-service-messaging-conf \
+  --from-file=$CERTS/hono-messaging-key.pem \
+  --from-file=$CERTS/hono-messaging-cert.pem \
+  --from-file=$CERTS/auth-server-cert.pem \
+  --from-file=$CERTS/trusted-certs.pem \
+  --from-file=application.yml=$CONFIG/hono-service-messaging-config.yml
+oc create -f $CONFIG/hono-service-messaging-jar/META-INF/fabric8/openshift.yml
 echo ... done
 
 echo Deploying HTTP REST adapter ...
-oc create -f $HONO_HOME/adapters/rest-vertx/target/classes/META-INF/fabric8/openshift.yml
+oc create secret generic hono-adapter-rest-vertx-conf \
+  --from-file=$CERTS/rest-adapter-key.pem \
+  --from-file=$CERTS/rest-adapter-cert.pem \
+  --from-file=$CERTS/trusted-certs.pem \
+  --from-file=application.yml=$CONFIG/hono-adapter-rest-vertx-config.yml
+oc create -f $CONFIG/hono-adapter-rest-vertx-jar/META-INF/fabric8/openshift.yml
 echo ... done
 
 echo Deploying MQTT adapter ...
-oc create -f $HONO_HOME/adapters/mqtt-vertx/target/classes/META-INF/fabric8/openshift.yml
+oc create secret generic hono-adapter-mqtt-vertx-conf \
+  --from-file=$CERTS/mqtt-adapter-key.pem \
+  --from-file=$CERTS/mqtt-adapter-cert.pem \
+  --from-file=$CERTS/trusted-certs.pem \
+  --from-file=application.yml=$CONFIG/hono-adapter-mqtt-vertx-config.yml
+oc create -f $CONFIG/hono-adapter-mqtt-vertx-jar/META-INF/fabric8/openshift.yml
 echo ... done
 
 echo ECLIPSE HONO DEPLOYED ON OPENSHIFT

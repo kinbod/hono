@@ -75,8 +75,13 @@ public class StandaloneEventApiTest {
     private static MessageSender               eventSender;
     private static RegistrationAssertionHelper assertionHelper;
 
+    /**
+     * Sets up Hono Messaging service.
+     * 
+     * @param ctx The test context.
+     */
     @BeforeClass
-    public static void prepareHonoServer(final TestContext ctx) throws Exception {
+    public static void prepareHonoServer(final TestContext ctx) {
 
         assertionHelper = RegistrationAssertionHelperImpl.forSharedSecret(SECRET, 10);
         downstreamAdapter = new MessageDiscardingDownstreamAdapter(vertx);
@@ -109,7 +114,6 @@ public class StandaloneEventApiTest {
                     .build());
             client.connect(new ProtonClientOptions(), setupTracker.completer());
         }, setupTracker);
-
     }
 
     /**
@@ -190,18 +194,21 @@ public class StandaloneEventApiTest {
 
     }
 
-    @Test(timeout = TIMEOUT)
+    @Test
     public void testEventWithNonMatchingRegistrationAssertionGetRejected(final TestContext ctx) throws Exception {
 
-        String assertion = assertionHelper.getAssertion(Constants.DEFAULT_TENANT, "other-device");
+        final String assertion = assertionHelper.getAssertion(Constants.DEFAULT_TENANT, "other-device");
+        final Async dispositionUpdate = ctx.async();
 
         client.getOrCreateEventSender(Constants.DEFAULT_TENANT, ctx.asyncAssertSuccess(sender -> {
             sender.send(DEVICE_1, "payload", "text/plain", assertion, (id, delivery) -> {
                 ctx.assertTrue(Rejected.class.isInstance(delivery.getRemoteState()));
                 ctx.assertTrue(sender.isOpen());
+                dispositionUpdate.complete();
             });
         }));
 
+        dispositionUpdate.await(TIMEOUT);
     }
 
     @Test(timeout = TIMEOUT)

@@ -23,7 +23,6 @@ import org.apache.qpid.proton.amqp.transport.ErrorCondition;
 import org.apache.qpid.proton.message.Message;
 import org.eclipse.hono.config.ServiceConfigProperties;
 import org.eclipse.hono.service.amqp.BaseEndpoint;
-import org.eclipse.hono.service.amqp.UpstreamReceiver;
 import org.eclipse.hono.service.registration.RegistrationAssertionHelper;
 import org.eclipse.hono.util.Constants;
 import org.eclipse.hono.util.MessageHelper;
@@ -148,8 +147,9 @@ public abstract class MessageForwardingEndpoint<T extends ServiceConfigPropertie
             receiver.close();
         } else {
             receiver.setQoS(receiver.getRemoteQoS());
+            receiver.setTarget(receiver.getRemoteTarget());
             final String linkId = UUID.randomUUID().toString();
-            final UpstreamReceiver link = UpstreamReceiver.newUpstreamReceiver(linkId, receiver, receiver.getRemoteQoS());
+            final UpstreamReceiver link = UpstreamReceiver.newUpstreamReceiver(linkId, receiver);
 
             downstreamAdapter.onClientAttach(link, s -> {
                 if (s.succeeded()) {
@@ -173,6 +173,30 @@ public abstract class MessageForwardingEndpoint<T extends ServiceConfigPropertie
                 }
             });
         }
+    }
+
+    /**
+     * Closes the link to an upstream client and removes all state kept for it.
+     * 
+     * @param client The client to detach.
+     */
+    protected final void onLinkDetach(final UpstreamReceiver client) {
+        onLinkDetach(client, null);
+    }
+
+    /**
+     * Closes the link to an upstream client and removes all state kept for it.
+     * 
+     * @param client The client to detach.
+     * @param error The error condition to convey to the client when closing the link.
+     */
+    protected final void onLinkDetach(final UpstreamReceiver client, final ErrorCondition error) {
+        if (error == null) {
+            logger.debug("closing receiver for client [{}]", client.getLinkId());
+        } else {
+            logger.debug("closing receiver for client [{}]: {}", client.getLinkId(), error.getDescription());
+        }
+        client.close(error);
     }
 
     final void forwardMessage(final UpstreamReceiver link, final ProtonDelivery delivery, final Message msg) {

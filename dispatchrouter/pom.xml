@@ -4,7 +4,7 @@
   <parent>
     <groupId>org.eclipse.hono</groupId>
     <artifactId>hono-bom</artifactId>
-    <version>0.5-M7-SNAPSHOT</version>
+    <version>0.5-M8-SNAPSHOT</version>
     <relativePath>../bom</relativePath>
   </parent>
 
@@ -17,6 +17,7 @@
     <maven.javadoc.skip>true</maven.javadoc.skip>
     <maven.source.skip>true</maven.source.skip>
     <gpg.skip>true</gpg.skip>
+    <skipNexusStagingDeployMojo>true</skipNexusStagingDeployMojo>
     <docker.skip.build>true</docker.skip.build>
   </properties>
 

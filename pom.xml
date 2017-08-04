@@ -16,7 +16,7 @@
 
   <groupId>org.eclipse.hono</groupId>
   <artifactId>hono-parent</artifactId>
-  <version>0.5-M7-SNAPSHOT</version>
+  <version>0.5-M8-SNAPSHOT</version>
   <packaging>pom</packaging>
 
   <name>Hono</name>
@@ -108,6 +108,26 @@
         <role>Committer</role>
       </roles>
     </developer>
+    <developer>
+      <id>kfrank</id>
+      <name>Karsten Frank</name>
+      <email>karsten.frank@bosch-si.com</email>
+      <organization>Bosch Software Innovations GmbH</organization>
+      <organizationUrl>http://www.bosch-si.com</organizationUrl>
+      <roles>
+        <role>Committer</role>
+      </roles>
+    </developer>
+    <developer>
+      <id>mpellmann</id>
+      <name>Marc Pellmann</name>
+      <email>marc.pellmann@bosch-si.com</email>
+      <organization>Bosch Software Innovations GmbH</organization>
+      <organizationUrl>http://www.bosch-si.com</organizationUrl>
+      <roles>
+        <role>Committer</role>
+      </roles>
+    </developer>
   </developers>
 
   <properties>
@@ -130,14 +150,6 @@
       Build images defined in modules with packaging type "pom".
      -->
     <fabric8.skip.build.pom>false</fabric8.skip.build.pom>
-    <!-- 
-      The default path to load the trusted CA certificates from.
-     -->
-    <hono.trustStore.path>/etc/hono/certs/trusted-certs.pem</hono.trustStore.path>
-    <hono.messaging.host>hono-service-messaging.hono</hono.messaging.host>
-    <hono.registration.host>hono-service-device-registry.hono</hono.registration.host>
-    <hono.auth.host>hono-service-auth.hono</hono.auth.host>
-    <hono.auth.validation.certPath>/etc/hono/certs/auth-server-cert.pem</hono.auth.validation.certPath>
   </properties>
 
   <modules>
@@ -424,7 +436,7 @@
          -->
         <groupId>org.sonatype.plugins</groupId>
         <artifactId>nexus-staging-maven-plugin</artifactId>
-        <version>1.6.7</version>
+        <version>1.6.8</version>
         <extensions>true</extensions>
         <configuration>
           <serverId>ossrh</serverId>

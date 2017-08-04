@@ -8,7 +8,7 @@
   <parent>
     <groupId>org.eclipse.hono</groupId>
     <artifactId>hono-bom</artifactId>
-    <version>0.5-M7-SNAPSHOT</version>
+    <version>0.5-M8-SNAPSHOT</version>
     <relativePath>../bom</relativePath>
   </parent>
   <modelVersion>4.0.0</modelVersion>
@@ -132,6 +132,13 @@ Test cases are run against Docker images of Hono server + (Apache Qpid Dispatch 
                               <include>*</include>
                             </includes>
                           </fileSet>
+                          <fileSet>
+                            <directory>${project.build.directory}/config/hono-demo-certs-jar</directory>
+                            <outputDirectory>certs</outputDirectory>
+                            <includes>
+                              <include>auth-server-*.pem</include>
+                            </includes>
+                          </fileSet>
                         </fileSets>
                       </inline>
                     </assembly>
@@ -170,6 +177,15 @@ Test cases are run against Docker images of Hono server + (Apache Qpid Dispatch 
                             <outputDirectory>.</outputDirectory>
                             <includes>
                               <include>*</include>
+                            </includes>
+                          </fileSet>
+                          <fileSet>
+                            <directory>${project.build.directory}/config/hono-demo-certs-jar</directory>
+                            <outputDirectory>certs</outputDirectory>
+                            <includes>
+                              <include>device-registry-*.pem</include>
+                              <include>auth-server-cert.pem</include>
+                              <include>trusted-certs.pem</include>
                             </includes>
                           </fileSet>
                         </fileSets>
@@ -308,6 +324,15 @@ Test cases are run against Docker images of Hono server + (Apache Qpid Dispatch 
                             <outputDirectory>.</outputDirectory>
                             <includes>
                               <include>*</include>
+                            </includes>
+                          </fileSet>
+                          <fileSet>
+                            <directory>${project.build.directory}/config/hono-demo-certs-jar</directory>
+                            <outputDirectory>certs</outputDirectory>
+                            <includes>
+                              <include>hono-messaging-*.pem</include>
+                              <include>auth-server-cert.pem</include>
+                              <include>trusted-certs.pem</include>
                             </includes>
                           </fileSet>
                         </fileSets>
