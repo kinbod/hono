@@ -22,14 +22,13 @@ import org.apache.qpid.proton.amqp.transport.AmqpError;
 import org.apache.qpid.proton.amqp.transport.ErrorCondition;
 import org.apache.qpid.proton.message.Message;
 import org.eclipse.hono.config.ServiceConfigProperties;
-import org.eclipse.hono.service.amqp.BaseEndpoint;
+import org.eclipse.hono.service.amqp.AbstractAmqpEndpoint;
 import org.eclipse.hono.service.registration.RegistrationAssertionHelper;
 import org.eclipse.hono.util.Constants;
 import org.eclipse.hono.util.MessageHelper;
 import org.eclipse.hono.util.ResourceIdentifier;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.boot.actuate.metrics.CounterService;
 
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
@@ -48,12 +47,12 @@ import io.vertx.proton.ProtonReceiver;
  * 
  * @param <T> The type of configuration properties this endpoint understands.
  */
-public abstract class MessageForwardingEndpoint<T extends ServiceConfigProperties> extends BaseEndpoint<T> {
+public abstract class MessageForwardingEndpoint<T extends ServiceConfigProperties> extends AbstractAmqpEndpoint<T> {
 
-    private CounterService                counterService = NullCounterService.getInstance();
-    private DownstreamAdapter             downstreamAdapter;
-    private MessageConsumer<String>       clientDisconnectListener;
-    private RegistrationAssertionHelper   registrationAssertionValidator;
+    private MessagingMetrics            metrics;
+    private DownstreamAdapter           downstreamAdapter;
+    private MessageConsumer<String>     clientDisconnectListener;
+    private RegistrationAssertionHelper registrationAssertionValidator;
 
     /**
      * Creates an endpoint for a Vertx instance.
@@ -78,26 +77,16 @@ public abstract class MessageForwardingEndpoint<T extends ServiceConfigPropertie
     }
 
     /**
-     * Sets the spring boot counter service, will be based on Dropwizard Metrics, if in classpath.
-     *
-     * @param counterService The counter service.
+     * Sets the metric for this service
+     * @param metrics The metric
      */
     @Autowired
-    public final void setCounterService(final CounterService counterService) {
-        this.counterService = counterService;
-    }
-
-    /**
-     * Gets the spring boot gauge service implementation
-     *
-     * @return The metrics service or a null implementation - never {@code null}
-     */
-    public final CounterService getCounterService() {
-        return counterService;
+    public final void setMetrics(final MessagingMetrics metrics) {
+        this.metrics = metrics;
     }
 
     @Override
-    protected final void doStart(Future<Void> startFuture) {
+    protected final void doStart(final Future<Void> startFuture) {
         if (downstreamAdapter == null) {
             startFuture.fail("no downstream adapter configured on endpoint");
         } else if (registrationAssertionValidator == null) {
@@ -111,7 +100,7 @@ public abstract class MessageForwardingEndpoint<T extends ServiceConfigPropertie
     }
 
     @Override
-    protected final void doStop(Future<Void> stopFuture) {
+    protected final void doStop(final Future<Void> stopFuture) {
         if (downstreamAdapter == null) {
             stopFuture.complete();
         } else {
@@ -157,7 +146,7 @@ public abstract class MessageForwardingEndpoint<T extends ServiceConfigPropertie
                         // client has closed link -> inform TelemetryAdapter about client detach
                         onLinkDetach(link);
                         downstreamAdapter.onClientDetach(link);
-                        counterService.decrement(MetricConstants.metricNameUpstreamLinks(targetAddress.toString()));
+                        metrics.decrementUpstreamLinks(targetAddress.toString());
                     }).handler((delivery, message) -> {
                         if (passesFormalVerification(targetAddress, message)) {
                             forwardMessage(link, delivery, message);
@@ -166,7 +155,7 @@ public abstract class MessageForwardingEndpoint<T extends ServiceConfigPropertie
                         }
                     }).open();
                     logger.debug("establishing link with client [{}]", con.getRemoteContainer());
-                    counterService.increment(MetricConstants.metricNameUpstreamLinks(targetAddress.toString()));
+                    metrics.incrementUpstreamLinks(targetAddress.toString());
                 } else {
                     // we cannot connect to downstream container, reject client
                     link.close(condition(AmqpError.PRECONDITION_FAILED, "no consumer available for target"));
@@ -202,7 +191,7 @@ public abstract class MessageForwardingEndpoint<T extends ServiceConfigPropertie
     final void forwardMessage(final UpstreamReceiver link, final ProtonDelivery delivery, final Message msg) {
 
         final ResourceIdentifier messageAddress = ResourceIdentifier.fromString(getAnnotation(msg, MessageHelper.APP_PROPERTY_RESOURCE, String.class));
-        final String token = MessageHelper.getRegistrationAssertion(msg);
+        final String token = MessageHelper.getAndRemoveRegistrationAssertion(msg);
 
         if (assertRegistration(token, messageAddress)) {
             downstreamAdapter.processMessage(link, delivery, msg);

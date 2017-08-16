@@ -5,7 +5,7 @@
   <parent>
     <groupId>org.eclipse.hono</groupId>
     <artifactId>hono-services</artifactId>
-    <version>0.5-M8-SNAPSHOT</version>
+    <version>0.5-M9-SNAPSHOT</version>
   </parent>
   <artifactId>hono-service-messaging</artifactId>
   <name>Hono Messaging</name>
@@ -23,10 +23,6 @@
       <artifactId>vertx-unit</artifactId>
     </dependency>
     <dependency>
-      <groupId>org.springframework.boot</groupId>
-      <artifactId>spring-boot-actuator</artifactId>
-    </dependency>
-    <dependency>
      <groupId>org.assertj</groupId>
      <artifactId>assertj-core</artifactId>
     </dependency>
@@ -34,22 +30,6 @@
      <groupId>org.eclipse.hono</groupId>
      <artifactId>hono-client</artifactId>
      <scope>test</scope>
-    </dependency>
-    <dependency>
-      <groupId>io.dropwizard.metrics</groupId>
-      <artifactId>metrics-core</artifactId>
-    </dependency>
-    <dependency>
-      <groupId>io.dropwizard.metrics</groupId>
-      <artifactId>metrics-jvm</artifactId>
-    </dependency>
-    <dependency>
-      <groupId>io.dropwizard.metrics</groupId>
-      <artifactId>metrics-graphite</artifactId>
-    </dependency>
-    <dependency>
-      <groupId>io.vertx</groupId>
-      <artifactId>vertx-dropwizard-metrics</artifactId>
     </dependency>
     <dependency>
       <groupId>org.eclipse.hono</groupId>

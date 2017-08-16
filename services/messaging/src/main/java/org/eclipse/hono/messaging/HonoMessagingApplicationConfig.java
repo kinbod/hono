@@ -15,6 +15,7 @@ package org.eclipse.hono.messaging;
 import org.eclipse.hono.config.ApplicationConfigProperties;
 import org.eclipse.hono.connection.ConnectionFactory;
 import org.eclipse.hono.connection.ConnectionFactoryImpl;
+import org.eclipse.hono.service.metric.MetricConfig;
 import org.eclipse.hono.service.registration.RegistrationAssertionHelper;
 import org.eclipse.hono.service.registration.RegistrationAssertionHelperImpl;
 import org.eclipse.hono.util.Constants;
@@ -29,6 +30,7 @@ import io.vertx.core.Vertx;
 import io.vertx.core.VertxOptions;
 import io.vertx.core.dns.AddressResolverOptions;
 import io.vertx.core.metrics.MetricsOptions;
+import org.springframework.context.annotation.Scope;
 
 /**
  * Spring bean definitions required by the Hono application.
@@ -36,13 +38,15 @@ import io.vertx.core.metrics.MetricsOptions;
 @Configuration
 public class HonoMessagingApplicationConfig {
 
+    private static final String BEAN_NAME_HONO_MESSAGING = "honoMessaging";
+
     private MetricsOptions metricsOptions;
 
     /**
      * Vert.x metrics options, if configured
      *
      * @param metricsOptions Vert.x metrics options
-     * @see MetricsConfig
+     * @see MetricConfig
      */
     @Autowired(required = false)
     public void setMetricsOptions(final MetricsOptions metricsOptions) {
@@ -68,6 +72,12 @@ public class HonoMessagingApplicationConfig {
         return Vertx.vertx(options);
     }
 
+    @Bean(name = BEAN_NAME_HONO_MESSAGING)
+    @Scope("prototype")
+    public HonoMessaging honoMessaging() {
+        return new HonoMessaging();
+    }
+
     /**
      * Exposes a factory for {@code HonoServer} instances as a Spring bean.
      * 
@@ -76,7 +86,7 @@ public class HonoMessagingApplicationConfig {
     @Bean
     public ObjectFactoryCreatingFactoryBean honoServerFactory() {
         ObjectFactoryCreatingFactoryBean factory = new ObjectFactoryCreatingFactoryBean();
-        factory.setTargetBeanName(HonoMessaging.class.getName());
+        factory.setTargetBeanName(BEAN_NAME_HONO_MESSAGING);
         return factory;
     }
 

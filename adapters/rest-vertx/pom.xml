@@ -4,10 +4,12 @@
   <parent>
     <groupId>org.eclipse.hono</groupId>
     <artifactId>hono-adapters</artifactId>
-    <version>0.5-M8-SNAPSHOT</version>
+    <version>0.5-M9-SNAPSHOT</version>
   </parent>
   <artifactId>hono-adapter-rest-vertx</artifactId>
   <name>Hono REST Adapter</name>
+
+  <description>A protocol adapter exposing Hono's Telemetry &amp; Event APIs via HTTP in a RESTful manner.</description>
 
   <dependencies>
     <dependency>
@@ -94,5 +96,4 @@
       </build>
     </profile>
   </profiles>
-
 </project>
