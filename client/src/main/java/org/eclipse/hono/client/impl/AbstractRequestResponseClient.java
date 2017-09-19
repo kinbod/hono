@@ -18,7 +18,6 @@ import io.vertx.core.Handler;
 import io.vertx.core.json.JsonObject;
 import io.vertx.proton.*;
 import org.apache.qpid.proton.amqp.messaging.AmqpValue;
-import org.apache.qpid.proton.amqp.messaging.ApplicationProperties;
 import org.apache.qpid.proton.message.Message;
 import org.eclipse.hono.client.RequestResponseClient;
 import org.eclipse.hono.util.MessageHelper;
@@ -48,13 +47,14 @@ import java.util.concurrent.atomic.AtomicLong;
 public abstract class AbstractRequestResponseClient<C extends RequestResponseClient, R extends RequestResponseResult>
         extends AbstractHonoClient implements RequestResponseClient {
 
-    private static final Logger           LOG = LoggerFactory.getLogger(AbstractRequestResponseClient.class);
-    protected final AtomicLong            messageCounter  = new AtomicLong();
-    private final String                  requestResponseAddressTemplate;
-    private final String                  requestResponseReplyToAddressTemplate;
+    private static final Logger LOG = LoggerFactory.getLogger(AbstractRequestResponseClient.class);
 
+    protected final AtomicLong                           messageCounter = new AtomicLong();
     protected final Map<String, Handler<AsyncResult<R>>> replyMap = new ConcurrentHashMap<>();
-    protected final String                replyToAddress;
+    protected final String                               replyToAddress;
+
+    private final String requestResponseAddressTemplate;
+    private final String requestResponseReplyToAddressTemplate;
 
     /**
      * Get the name of the endpoint that this client targets at.
@@ -74,15 +74,18 @@ public abstract class AbstractRequestResponseClient<C extends RequestResponseCli
      * Creates a result object from the status and payload of a response received from the endpoint.
      *
      * @param status The status of the response.
-     * @param payload The json payload of the response.
+     * @param payload The json payload of the response as String.
      * @return The result object.
      */
-    protected abstract R getResult(final int status, final JsonObject payload);
+    protected abstract R getResult(final int status, final String payload);
 
     /**
      * Creates a client for a vert.x context.
      *
      * @param context The context to run all interactions with the server on.
+     * @param con The connection to use for interacting with the service.
+     * @param tenantId The tenant that the client will be scoped to.
+     * @param creationHandler The handler to invoke with the created client.
      */
     protected AbstractRequestResponseClient(final Context context, final ProtonConnection con, final String tenantId,
                                             final Handler<AsyncResult<C>> creationHandler) {
@@ -166,7 +169,7 @@ public abstract class AbstractRequestResponseClient<C extends RequestResponseCli
                 message.getApplicationProperties(),
                 MessageHelper.APP_PROPERTY_STATUS,
                 String.class);
-        final JsonObject payload = MessageHelper.getJsonPayload(message);
+        final String payload = MessageHelper.getPayload(message);
         return getResult(Integer.valueOf(status), payload);
     }
 

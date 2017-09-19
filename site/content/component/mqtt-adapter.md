@@ -82,6 +82,7 @@ The following table provides an overview of the configuration variables and corr
 | `HONO_MQTT_KEY_STORE_PATH`<br>`--hono.mqtt.keyStorePath` | no | - | The absolute path to the Java key store containing the private key and certificate that the protocol adapter should use for authenticating to clients. Either this option or the `HONO_MQTT_KEY_PATH` and `HONO_MQTT_CERT_PATH` options need to be set in order to enable TLS secured connections with clients. The key store format can be either `JKS` or `PKCS12` indicated by a `.jks` or `.p12` file suffix respectively. |
 | `HONO_MQTT_MAX_PAYLOAD_SIZE`<br>`--hono.mqtt.maxPayloadSize` | no | `2048` | The maximum allowed size of an incoming MQTT message's payload in bytes. When a client sends a message with a larger payload, the message is discarded and the connection to the client gets closed. |
 | `HONO_MQTT_PORT`<br>`--hono.mqtt.port` | no | `8883` | The secure port that the protocol adapter should listen on.<br>See [Port Configuration]({{< relref "#port-configuration" >}}) below for details. |
+| `HONO_MQTT_AUTHENTICATION_REQUIRED`<br>`--hono.mqtt.authenticationRequired` | no | `true` | If set to `true` the protocol adapter demands the authentication of devices by using the [Credentials Service]({{< relref "#credentials-service-configuration" >}}) before they are allowed to publish messages. |
 
 The variables only need to be set if the default values do not match your environment.
 
@@ -200,6 +201,11 @@ The same holds true analogously for the *hono-service-device-registry.hono* addr
 
 ## Using the Telemetry Topic Hierarchy
 
+The following examples use a username and password for connecting to MQTT. The username reflects the auth-id of the [Credentals API]({{< relref "api/Credentials-API.md" >}}) and usually represents a device.
+
+**NB** The standard setup of the [Device Registry component]({{< relref "component/device-registry.md" >}}) provides the example auth-id `sensor1` with the password `hono-secret` which are used here. 
+
+
 ### Upload Telemetry Data
 
 * Topic: `telemetry/${tenantId}/${deviceId}`
@@ -211,7 +217,7 @@ The same holds true analogously for the *hono-service-device-registry.hono* addr
 
 Upload a JSON string for device `4711`:
 
-    $ mosquitto_pub -i 4711 -t telemetry/DEFAULT_TENANT/4711 -m '{"temp": 5}'
+    $ mosquitto_pub -i 4711 -u 'sensor1@DEFAULT_TENANT' -P hono-secret -t telemetry/DEFAULT_TENANT/4711 -m '{"temp": 5}'
 
 ## Using the Event Topic Hierarchy
 
@@ -226,4 +232,10 @@ Upload a JSON string for device `4711`:
 
 Upload a JSON string for device `4711`:
 
-    $ mosquitto_pub -i 4711 -t event/DEFAULT_TENANT/4711 -m '{"alarm": 1}'
+    $ mosquitto_pub -i 4711 -u 'sensor1@DEFAULT_TENANT' -P hono-secret -t event/DEFAULT_TENANT/4711 -m '{"alarm": 1}'
+
+**Setup without authentication**
+
+To create a setup without authentication, please ensure that the `HONO_MQTT_AUTHENTICATION_REQUIRED` property is set to false.
+For such a setup the `-u`  and `-P` parts of the `mosquitto_pub` calls can be skipped.
+

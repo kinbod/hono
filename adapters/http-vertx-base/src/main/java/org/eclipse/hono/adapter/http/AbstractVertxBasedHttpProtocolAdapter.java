@@ -23,7 +23,9 @@ import org.eclipse.hono.client.MessageSender;
 import org.eclipse.hono.config.ServiceConfigProperties;
 import org.eclipse.hono.service.AbstractProtocolAdapterBase;
 import org.eclipse.hono.util.Constants;
+import org.eclipse.hono.util.EventConstants;
 import org.eclipse.hono.util.JwtHelper;
+import org.eclipse.hono.util.TelemetryConstants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -75,6 +77,18 @@ public abstract class AbstractVertxBasedHttpProtocolAdapter<T extends ServiceCon
 
     private HttpServer server;
     private HttpServer insecureServer;
+
+    private HttpAdapterMetrics metrics;
+
+    /**
+     * Sets the metrics for this service
+     *
+     * @param metrics The metrics
+     */
+    @Autowired
+    public final void setMetrics(final HttpAdapterMetrics metrics) {
+        this.metrics = metrics;
+    }
 
     /**
      * @return 8443
@@ -145,7 +159,7 @@ public abstract class AbstractVertxBasedHttpProtocolAdapter<T extends ServiceCon
     }
 
     @Override
-    public final void doStart(Future<Void> startFuture) {
+    public final void doStart(final Future<Void> startFuture) {
 
         checkPortConfiguration()
             .compose(s -> preStartup())
@@ -325,7 +339,7 @@ public abstract class AbstractVertxBasedHttpProtocolAdapter<T extends ServiceCon
     }
 
     @Override
-    public final void doStop(Future<Void> stopFuture) {
+    public final void doStop(final Future<Void> stopFuture) {
 
         try {
             preShutdown();
@@ -467,7 +481,7 @@ public abstract class AbstractVertxBasedHttpProtocolAdapter<T extends ServiceCon
      * @throws NullPointerException if response is {@code null}.
      */
     protected static void endWithStatus(final HttpServerResponse response, final int status,
-            Map<CharSequence, CharSequence> headers, final String detail, final String contentType) {
+            final Map<CharSequence, CharSequence> headers, final String detail, final String contentType) {
 
         Objects.requireNonNull(response);
         response.setStatusCode(status);
@@ -569,7 +583,8 @@ public abstract class AbstractVertxBasedHttpProtocolAdapter<T extends ServiceCon
                 Objects.requireNonNull(deviceId),
                 payload,
                 contentType,
-                getTelemetrySender(tenant));
+                getTelemetrySender(tenant),
+                TelemetryConstants.TELEMETRY_ENDPOINT);
     }
 
     /**
@@ -620,16 +635,20 @@ public abstract class AbstractVertxBasedHttpProtocolAdapter<T extends ServiceCon
                 Objects.requireNonNull(deviceId),
                 payload,
                 contentType,
-                getEventSender(tenant));
+                getEventSender(tenant),
+                EventConstants.EVENT_ENDPOINT);
     }
 
     private void doUploadMessage(final RoutingContext ctx, final String tenant, final String deviceId,
-            final Buffer payload, final String contentType, final Future<MessageSender> senderTracker) {
+            final Buffer payload, final String contentType, final Future<MessageSender> senderTracker,
+            final String endpointName) {
 
         if (contentType == null) {
             badRequest(ctx.response(), String.format("%s header is missing", HttpHeaders.CONTENT_TYPE));
+            metrics.incrementUndeliverableHttpMessages(endpointName,tenant);
         } else if (payload == null || payload.length() == 0) {
             badRequest(ctx.response(), "missing body");
+            metrics.incrementUndeliverableHttpMessages(endpointName,tenant);
         } else {
             
             final Future<String> tokenTracker = getRegistrationAssertionHeader(ctx, tenant, deviceId);
@@ -642,23 +661,28 @@ public abstract class AbstractVertxBasedHttpProtocolAdapter<T extends ServiceCon
                     } else {
                         serviceUnavailable(ctx.response(), 5);
                     }
+                    metrics.incrementUndeliverableHttpMessages(endpointName,tenant);
                 } else {
-                    sendToHono(ctx.response(), deviceId, payload, contentType, tokenTracker.result(), senderTracker.result());
+                    sendToHono(ctx.response(), deviceId, payload, contentType, tokenTracker.result(),
+                            senderTracker.result(), tenant, endpointName);
                 }
             });
         }
     }
 
     private void sendToHono(final HttpServerResponse response, final String deviceId, final Buffer payload,
-            final String contentType, final String token, final MessageSender sender) {
+            final String contentType, final String token, final MessageSender sender, final String tenant,
+            final String endpointName) {
 
         boolean accepted = sender.send(deviceId, payload.getBytes(), contentType, token);
         if (accepted) {
             response.setStatusCode(HTTP_ACCEPTED).end();
+            metrics.incrementProcessedHttpMessages(endpointName,tenant);
         } else {
             serviceUnavailable(response, 2,
                     "resource limit exceeded, please try again later",
                     "text/plain");
+            metrics.incrementUndeliverableHttpMessages(endpointName,tenant);
         }
     }
 
@@ -688,5 +712,10 @@ public abstract class AbstractVertxBasedHttpProtocolAdapter<T extends ServiceCon
                 return Future.succeededFuture(token);
             });
         }
+    }
+
+    @Override
+    protected Future<String> validateCredentialsForDevice(final String tenantId, final String type, final String authId, final Object authenticationObject) {
+        return approveCredentialsAndResolveLogicalDeviceId(tenantId, type, authId, authenticationObject);
     }
 }

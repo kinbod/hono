@@ -15,10 +15,13 @@ package org.eclipse.hono.adapter.mqtt;
 import java.nio.charset.Charset;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 
+import io.vertx.core.AsyncResult;
 import org.apache.qpid.proton.amqp.messaging.Accepted;
+import org.eclipse.hono.auth.UsernamePasswordCredentials;
 import org.eclipse.hono.client.MessageSender;
-import org.eclipse.hono.config.ServiceConfigProperties;
+import org.eclipse.hono.config.ProtocolAdapterProperties;
 import org.eclipse.hono.service.AbstractProtocolAdapterBase;
 import org.eclipse.hono.service.registration.RegistrationAssertionHelperImpl;
 import org.eclipse.hono.util.Constants;
@@ -34,11 +37,12 @@ import io.vertx.mqtt.MqttEndpoint;
 import io.vertx.mqtt.MqttServer;
 import io.vertx.mqtt.MqttServerOptions;
 import io.vertx.mqtt.messages.MqttPublishMessage;
+import org.springframework.beans.factory.annotation.Autowired;
 
 /**
  * A Vert.x based Hono protocol adapter for accessing Hono's Telemetry API using MQTT.
  */
-public class VertxBasedMqttProtocolAdapter extends AbstractProtocolAdapterBase<ServiceConfigProperties> {
+public class VertxBasedMqttProtocolAdapter extends AbstractProtocolAdapterBase<ProtocolAdapterProperties> {
 
     private static final Logger LOG = LoggerFactory.getLogger(VertxBasedMqttProtocolAdapter.class);
 
@@ -48,9 +52,21 @@ public class VertxBasedMqttProtocolAdapter extends AbstractProtocolAdapterBase<S
     private static final int IANA_MQTT_PORT = 1883;
     private static final int IANA_SECURE_MQTT_PORT = 8883;
 
+
     private MqttServer server;
     private MqttServer insecureServer;
     private Map<MqttEndpoint, String> registrationAssertions = new HashMap<>();
+    private MqttAdapterMetrics metrics;
+
+    /**
+     * Sets the metrics for this service
+     *
+     * @param metrics The metrics
+     */
+    @Autowired
+    public final void setMetrics(final MqttAdapterMetrics metrics) {
+        this.metrics = metrics;
+    }
 
     @Override
     public int getPortDefaultValue() {
@@ -72,6 +88,24 @@ public class VertxBasedMqttProtocolAdapter extends AbstractProtocolAdapterBase<S
         return (insecureServer != null ? insecureServer.actualPort() : Constants.PORT_UNCONFIGURED);
     }
 
+    public void setMqttSecureServer(MqttServer server) {
+        Objects.requireNonNull(server);
+        if (server.actualPort() > 0) {
+            throw new IllegalArgumentException("mqtt server must not be started already");
+        } else {
+            this.server = server;
+        }
+    }
+
+    public void setMqttInsecureServer(MqttServer server) {
+        Objects.requireNonNull(server);
+        if (server.actualPort() > 0) {
+            throw new IllegalArgumentException("mqtt server must not be started already");
+        } else {
+            this.insecureServer = server;
+        }
+    }
+
     private Future<MqttServer> bindSecureMqttServer() {
 
         if (isSecurePortEnabled()) {
@@ -82,7 +116,13 @@ public class VertxBasedMqttProtocolAdapter extends AbstractProtocolAdapterBase<S
                 .setMaxMessageSize(getConfig().getMaxPayloadSize());
             addTlsKeyCertOptions(options);
             addTlsTrustOptions(options);
-            return bindMqttServer(options);
+
+            Future<MqttServer> result = Future.future();
+            result.setHandler(mqttServerAsyncResult -> {
+                server = mqttServerAsyncResult.result();
+            });
+            bindMqttServer(options, server, result);
+            return result;
         } else {
             return Future.succeededFuture();
         }
@@ -96,44 +136,49 @@ public class VertxBasedMqttProtocolAdapter extends AbstractProtocolAdapterBase<S
                 .setHost(getConfig().getInsecurePortBindAddress())
                 .setPort(determineInsecurePort())
                 .setMaxMessageSize(getConfig().getMaxPayloadSize());
-            return bindMqttServer(options);
+
+            Future<MqttServer> result = Future.future();
+            result.setHandler(mqttServerAsyncResult -> {
+                insecureServer = mqttServerAsyncResult.result();
+            });
+            bindMqttServer(options, insecureServer, result);
+            return result;
         } else {
             return Future.succeededFuture();
         }
     }
 
-    private Future<MqttServer> bindMqttServer(final MqttServerOptions options) {
+    private void bindMqttServer(final MqttServerOptions options, final MqttServer mqttServer, final Future<MqttServer> result) {
 
-        final Future<MqttServer> result = Future.future();
-        MqttServer server = MqttServer.create(this.vertx, options);
+        final MqttServer createdMqttServer =
+                (mqttServer == null ? MqttServer.create(this.vertx, options) : mqttServer);
 
-        server
+        createdMqttServer
             .endpointHandler(this::handleEndpointConnection)
             .listen(done -> {
 
                 if (done.succeeded()) {
-                    LOG.info("Hono MQTT protocol adapter running on {}:{}", getConfig().getBindAddress(), server.actualPort());
-                    result.complete(server);
+                    LOG.info("Hono MQTT protocol adapter running on {}:{}", getConfig().getBindAddress(), createdMqttServer.actualPort());
+                    result.complete(createdMqttServer);
                 } else {
                     LOG.error("error while starting up Hono MQTT adapter", done.cause());
                     result.fail(done.cause());
                 }
 
             });
-        return result;
     }
 
     @Override
     public void doStart(final Future<Void> startFuture) {
 
         LOG.info("limiting size of inbound message payload to {} bytes", getConfig().getMaxPayloadSize());
+        if (!getConfig().isAuthenticationRequired()) {
+            LOG.warn("authentication of devices switched off");
+        }
         checkPortConfiguration()
-        .compose(s -> bindSecureMqttServer())
-        .compose(secureServer -> {
-            this.server = secureServer;
-            return bindInsecureMqttServer();
-        }).compose(insecureServer -> {
-            this.insecureServer = insecureServer;
+        .compose(v -> bindSecureMqttServer())
+        .compose(s -> bindInsecureMqttServer())
+        .compose(insecureServer -> {
             connectToMessaging(null);
             connectToDeviceRegistration(null);
             connectToCredentialsService(null);
@@ -142,7 +187,7 @@ public class VertxBasedMqttProtocolAdapter extends AbstractProtocolAdapterBase<S
     }
 
     @Override
-    public void doStop(Future<Void> stopFuture) {
+    public void doStop(final Future<Void> stopFuture) {
 
         Future<Void> shutdownTracker = Future.future();
         shutdownTracker.setHandler(done -> {
@@ -175,7 +220,7 @@ public class VertxBasedMqttProtocolAdapter extends AbstractProtocolAdapterBase<S
             }, shutdownTracker);
     }
 
-    private void handleEndpointConnection(final MqttEndpoint endpoint) {
+    void handleEndpointConnection(final MqttEndpoint endpoint) {
 
         LOG.info("connection request from client {}", endpoint.clientIdentifier());
 
@@ -183,83 +228,149 @@ public class VertxBasedMqttProtocolAdapter extends AbstractProtocolAdapterBase<S
             endpoint.reject(MqttConnectReturnCode.CONNECTION_REFUSED_SERVER_UNAVAILABLE);
 
         } else {
+            if (getConfig().isAuthenticationRequired()) {
+                handleEndpointConnectionWithAuthentication(endpoint);
+            } else {
+                handleEndpointConnectionWithoutAuthentication(endpoint);
+            }
+        }
+    }
+
+    private void handleEndpointConnectionWithoutAuthentication(final MqttEndpoint endpoint) {
+        endpoint.closeHandler(v -> {
+            LOG.debug("connection closed with client [{}]", endpoint.clientIdentifier());
+            if (registrationAssertions.remove(endpoint) != null)
+                LOG.trace("removed registration assertion for client [{}]", endpoint.clientIdentifier());
+        });
+        endpoint.publishHandler(message -> {
+            final ResourceIdentifier resource = ResourceIdentifier.fromString(message.topicName());
+
+            if (resource.getResourceId() == null) {
+                // if MQTT client doesn't specify device_id then closing connection (MQTT has no way for errors)
+                close(endpoint);
+            }
+            if (resource.getTenantId() == null) {
+                // if MQTT client doesn't specify device_id then closing connection (MQTT has no way for errors)
+                close(endpoint);
+            }
+            publishMessage(endpoint, resource.getTenantId(), resource.getResourceId(), message, resource);
+        });
+        endpoint.accept(false);
+    }
+
+    private void handleEndpointConnectionWithAuthentication(final MqttEndpoint endpoint) {
+        // check credentials for valid authentication
+        // so far, only hashed-password supported, more to follow
+        if (endpoint.auth() == null) {
+            LOG.trace("no auth information in endpoint found");
+            endpoint.reject(MqttConnectReturnCode.CONNECTION_REFUSED_BAD_USER_NAME_OR_PASSWORD);
+            return;
+        }
+        
+        UsernamePasswordCredentials authObject = UsernamePasswordCredentials.create(endpoint.auth().userName(),
+                endpoint.auth().password(), getConfig().isSingleTenant());
+
+        if (authObject == null) {
+            endpoint.reject(MqttConnectReturnCode.CONNECTION_REFUSED_BAD_USER_NAME_OR_PASSWORD);
+            return;
+        }
+
+        validateCredentialsForDevice(authObject.getTenantId(), authObject.getType(), authObject.getAuthId(),
+                authObject.getPassword()).setHandler(attempt -> handleCredentialsResult(attempt, endpoint, authObject));
+    }
+
+    void handleCredentialsResult(final AsyncResult<String> attempt, final MqttEndpoint endpoint, final UsernamePasswordCredentials authObject) {
+        if (attempt.succeeded()) {
+            String logicalDeviceId = attempt.result();
+            LOG.trace("successfully authenticated device id <{}>", logicalDeviceId);
+            endpoint.accept(false);
+
             endpoint.publishHandler(message -> {
+                final ResourceIdentifier resource = ResourceIdentifier.fromString(message.topicName());
 
-                LOG.trace("received message [client ID: {}, topic: {}, QoS: {}, payload {}]", endpoint.clientIdentifier(), message.topicName(),
-                        message.qosLevel(), message.payload().toString(Charset.defaultCharset()));
-
-                try {
-
-                    final ResourceIdentifier resource = ResourceIdentifier.fromString(message.topicName());
-
-                    // if MQTT client doesn't specify device_id then closing connection (MQTT has now way for errors)
-                    if (resource.getResourceId() == null) {
-                        close(endpoint);
-                    } else {
-
-                        Future<Void> messageTracker = Future.future();
-                        messageTracker.setHandler(s -> {
-                            if (s.failed()) {
-                                LOG.debug("cannot process message [client ID: {}, topic: {}, QoS: {}]: {}", endpoint.clientIdentifier(),
-                                        resource, message.qosLevel(), s.cause().getMessage());
-                                close(endpoint);
-                            } else {
-                                LOG.trace("successfully processed message [client ID: {}, topic: {}, QoS: {}]", endpoint.clientIdentifier(),
-                                        resource, message.qosLevel());
-                            }
-                        });
-
-                        // check that MQTT client tries to publish on topic with device_id same as on connection
-                        if (resource.getResourceId().equals(endpoint.clientIdentifier())) {
-
-                            Future<String> assertionTracker = getRegistrationAssertion(endpoint, resource);
-                            Future<MessageSender> senderTracker = getSenderTracker(message, resource);
-
-                            CompositeFuture.all(assertionTracker, senderTracker).compose(ok -> {
-                                doUploadMessage(resource.getTenantId(), assertionTracker.result(), endpoint, message, senderTracker.result(), messageTracker);
-                            }, messageTracker);
-
-
-                        } else {
-                            // MQTT client is trying to publish on a different device_id used on connection (MQTT has no way for errors)
-                            messageTracker.fail("client not authorized");
-                        }
-
-                    }
-
-                } catch (IllegalArgumentException e) {
-
-                    // MQTT client is trying to publish on invalid topic; it does not contain at least two segments
-                    LOG.debug("client [ID: {}] tries to publish on unsupported topic", endpoint.clientIdentifier());
-                    close(endpoint);
+                if (!validateCredentialsWithTopicStructure(resource, authObject.getTenantId(), logicalDeviceId)) {
+                    // if MQTT client does not conform to the topic structure, close the connection (MQTT has no way for errors)
+                    endpoint.close();
+                } else {
+                    publishMessage(endpoint, authObject.getTenantId(), logicalDeviceId, message, resource);
                 }
             });
 
             endpoint.closeHandler(v -> {
-                LOG.debug("connection closed with client [{}]", endpoint.clientIdentifier());
+                LOG.debug("connection closed with client [{}], authId [{}], deviceId [{}]",
+                        endpoint.clientIdentifier(), authObject.getAuthId(), logicalDeviceId);
                 if (registrationAssertions.remove(endpoint) != null)
                     LOG.trace("removed registration assertion for client [{}]", endpoint.clientIdentifier());
             });
 
-            endpoint.accept(false);
+        } else {
+            endpoint.reject(MqttConnectReturnCode.CONNECTION_REFUSED_NOT_AUTHORIZED);
         }
     }
 
-    private Future<MessageSender> getSenderTracker(final MqttPublishMessage message, final ResourceIdentifier resource) {
+    private void publishMessage(final MqttEndpoint endpoint, final String tenantId, final String logicalDeviceId,
+            final MqttPublishMessage message, final ResourceIdentifier resource) {
+        LOG.trace("received message [client ID: {}, topic: {}, QoS: {}, payload {}]", endpoint.clientIdentifier(),
+                message.topicName(),
+                message.qosLevel(), message.payload().toString(Charset.defaultCharset()));
+
+        try {
+            Future<Void> messageTracker = Future.future();
+            messageTracker.setHandler(s -> {
+                if (s.failed()) {
+                    LOG.debug("cannot process message [client ID: {}, deviceId: {}, topic: {}, QoS: {}]: {}",
+                            endpoint.clientIdentifier(), logicalDeviceId,
+                            resource, message.qosLevel(), s.cause().getMessage());
+                    metrics.incrementUndeliverableMqttMessages(resource.getEndpoint(), tenantId);
+                    close(endpoint);
+                } else {
+                    LOG.trace("successfully processed message [client ID: {}, deviceId: {}, topic: {}, QoS: {}]",
+                            endpoint.clientIdentifier(), logicalDeviceId,
+                            resource, message.qosLevel());
+                    metrics.incrementProcessedMqttMessages(resource.getEndpoint(), tenantId);
+                }
+            });
+
+            // check that MQTT client tries to publish on topic with device_id same as on connection
+            if (!getConfig().isAuthenticationRequired()
+                    && !resource.getResourceId().equals(endpoint.clientIdentifier())) {
+                // MQTT client is trying to publish on a different device_id used on connection (MQTT has no way for
+                // errors)
+                messageTracker.fail("client not authorized");
+            } else {
+                Future<String> assertionTracker = getRegistrationAssertion(endpoint, tenantId, logicalDeviceId);
+                Future<MessageSender> senderTracker = getSenderTracker(message, resource, tenantId);
+
+                CompositeFuture.all(assertionTracker, senderTracker).compose(ok -> {
+                    doUploadMessage(logicalDeviceId, assertionTracker.result(), endpoint, message,
+                            senderTracker.result(), messageTracker);
+                }, messageTracker);
+            }
+
+        } catch (IllegalArgumentException e) {
+
+            // MQTT client is trying to publish on invalid topic; it does not contain at least two segments
+            LOG.debug("client [ID: {}] tries to publish on unsupported topic", endpoint.clientIdentifier());
+            close(endpoint);
+        }
+    }
+
+    private Future<MessageSender> getSenderTracker(final MqttPublishMessage message, final ResourceIdentifier resource,
+                                                   final String tenantId) {
 
         if (resource.getEndpoint().equals(TELEMETRY_ENDPOINT)) {
             if (!MqttQoS.AT_MOST_ONCE.equals(message.qosLevel())) {
                 // client tries to send telemetry message using QoS 1 or 2
                 return Future.failedFuture("Only QoS 0 supported for telemetry messages");
             } else {
-                return getTelemetrySender(resource.getTenantId());
+                return getTelemetrySender(tenantId);
             }
         } else if (resource.getEndpoint().equals(EVENT_ENDPOINT)) {
             if (!MqttQoS.AT_LEAST_ONCE.equals(message.qosLevel())) {
                 // client tries to send event message using QoS 0 or 2
                 return Future.failedFuture("Only QoS 1 supported for event messages");
             } else {
-                return getEventSender(resource.getTenantId());
+                return getEventSender(tenantId);
             }
         } else {
             // MQTT client is trying to publish on a not supported endpoint
@@ -268,14 +379,14 @@ public class VertxBasedMqttProtocolAdapter extends AbstractProtocolAdapterBase<S
         }
     }
 
-    private Future<String> getRegistrationAssertion(final MqttEndpoint endpoint, final ResourceIdentifier address) {
+    private Future<String> getRegistrationAssertion(final MqttEndpoint endpoint, final String tenantId, final String logicalDeviceId) {
         String token = registrationAssertions.get(endpoint);
         if (token != null && !RegistrationAssertionHelperImpl.isExpired(token, 10)) {
             return Future.succeededFuture(token);
         } else {
             registrationAssertions.remove(endpoint);
             Future<String> result = Future.future();
-            getRegistrationAssertion(address.getTenantId(), address.getResourceId()).compose(t -> {
+            getRegistrationAssertion(tenantId, logicalDeviceId).compose(t -> {
                 // if the client closes the connection right after publishing the messages and before that
                 // the registration assertion has been returned, avoid to put it into the map
                 if (endpoint.isConnected()) {
@@ -288,6 +399,11 @@ public class VertxBasedMqttProtocolAdapter extends AbstractProtocolAdapterBase<S
         }
     }
 
+    @Override
+    protected Future<String> validateCredentialsForDevice(final String tenantId, final String type, final String authId, final Object authenticationObject) {
+        return approveCredentialsAndResolveLogicalDeviceId(tenantId, type, authId, authenticationObject);
+    }
+
     private void close(final MqttEndpoint endpoint) {
         registrationAssertions.remove(endpoint);
         if (endpoint.isConnected()) {
@@ -298,10 +414,10 @@ public class VertxBasedMqttProtocolAdapter extends AbstractProtocolAdapterBase<S
         }
     }
 
-    private void doUploadMessage(final String tenant, final String registrationAssertion, final MqttEndpoint endpoint, final MqttPublishMessage message,
+    void doUploadMessage(final String logicalDeviceId, final String registrationAssertion, final MqttEndpoint endpoint, final MqttPublishMessage message,
             final MessageSender sender, final Future<Void> uploadHandler) {
 
-        boolean accepted = sender.send(endpoint.clientIdentifier(), message.payload().getBytes(), CONTENT_TYPE_OCTET_STREAM, registrationAssertion, (messageId, delivery) -> {
+        boolean accepted = sender.send(logicalDeviceId, message.payload().getBytes(), CONTENT_TYPE_OCTET_STREAM, registrationAssertion, (messageId, delivery) -> {
             LOG.trace("delivery state updated [message ID: {}, new remote state: {}]", messageId, delivery.getRemoteState());
             if (message.qosLevel() == MqttQoS.AT_MOST_ONCE) {
                 uploadHandler.complete();

@@ -73,6 +73,7 @@ public class AbstractVertxBasedHttpProtocolAdapterTest {
         adapter.setHonoMessagingClient(messagingClient);
         adapter.setRegistrationServiceClient(registrationClient);
         adapter.setCredentialsServiceClient(credentialsClient);
+        adapter.setMetrics(mock(HttpAdapterMetrics.class));
 
         // WHEN starting the adapter
         Async startup = ctx.async();
@@ -106,6 +107,7 @@ public class AbstractVertxBasedHttpProtocolAdapterTest {
 
         AbstractVertxBasedHttpProtocolAdapter<ServiceConfigProperties> adapter = getAdapter(server, onStartupSuccess);
         adapter.setCredentialsServiceClient(credentialsClient);
+        adapter.setMetrics(mock(HttpAdapterMetrics.class));
 
         // WHEN starting the adapter
         Async startup = ctx.async();
@@ -139,6 +141,7 @@ public class AbstractVertxBasedHttpProtocolAdapterTest {
         Async onStartupSuccess = ctx.async();
 
         AbstractVertxBasedHttpProtocolAdapter<ServiceConfigProperties> adapter = getAdapter(server, onStartupSuccess);
+        adapter.setMetrics(mock(HttpAdapterMetrics.class));
 
         // WHEN starting the adapter
         Async startup = ctx.async();
@@ -182,6 +185,11 @@ public class AbstractVertxBasedHttpProtocolAdapterTest {
             protected void onStartupSuccess() {
                 ctx.fail("should not invoke onStartupSuccess");
             }
+
+            @Override
+            protected Future<String> validateCredentialsForDevice(final String tenantId, final String type, final String authId, final Object authenticationObject) {
+                return null;
+            }
         };
 
         adapter.setConfig(config);
@@ -189,6 +197,7 @@ public class AbstractVertxBasedHttpProtocolAdapterTest {
         adapter.setHonoMessagingClient(messagingClient);
         adapter.setRegistrationServiceClient(registrationClient);
         adapter.setCredentialsServiceClient(credentialsClient);
+        adapter.setMetrics(mock(HttpAdapterMetrics.class));
 
         // WHEN starting the adapter
         Async startupFailed = ctx.async();
@@ -236,12 +245,18 @@ public class AbstractVertxBasedHttpProtocolAdapterTest {
             protected void onStartupSuccess() {
                 onStartupSuccess.complete();
             }
+
+            @Override
+            protected Future<String> validateCredentialsForDevice(final String tenantId, final String type, final String authId, final Object authenticationObject) {
+                return null;
+            }
         };
 
         adapter.setConfig(config);
         adapter.setInsecureHttpServer(server);
         adapter.setHonoMessagingClient(messagingClient);
         adapter.setRegistrationServiceClient(registrationClient);
+        adapter.setMetrics(mock(HttpAdapterMetrics.class));
         return adapter;
     }
 
@@ -265,6 +280,11 @@ public class AbstractVertxBasedHttpProtocolAdapterTest {
             @Override
             protected Router createRouter() {
                 return router;
+            }
+
+            @Override
+            protected Future<String> validateCredentialsForDevice(final String tenantId, final String type, final String authId, final Object authenticationObject) {
+                return null;
             }
         };
     }

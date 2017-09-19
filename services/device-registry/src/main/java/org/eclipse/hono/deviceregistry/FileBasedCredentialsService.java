@@ -24,7 +24,6 @@ import org.eclipse.hono.util.CredentialsResult;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Repository;
 
-import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -61,46 +60,54 @@ public final class FileBasedCredentialsService extends BaseCredentialsService<Fi
     @Override
     protected void doStart(final Future<Void> startFuture) throws Exception {
         if (!running) {
-            loadCredentials();
-            if (getConfig().isSaveToFile()) {
-                log.info("saving credentials to file every 3 seconds");
-                vertx.setPeriodic(3000, saveIdentities -> {
-                    saveToFile(Future.future());
-                });
-            } else {
-                log.info("persistence is disabled, will not save credentials to file");
-            }
+            loadCredentials().compose(s -> {
+                if (getConfig().isSaveToFile()) {
+                    log.info("saving credentials to file every 3 seconds");
+                    vertx.setPeriodic(3000, saveIdentities -> {
+                        saveToFile(Future.future());
+                    });
+                } else {
+                    log.info("persistence is disabled, will not save credentials to file");
+                }
+                running = true;
+                startFuture.complete();
+            }, startFuture);
+        } else {
+            startFuture.complete();
         }
-        running = true;
-        startFuture.complete();
     }
 
-    void loadCredentials() throws IOException {
+    Future<Void> loadCredentials() {
+        Future<Void> result = Future.future();
         if (getConfig().getCredentialsFilename() == null) {
-            throw new IllegalStateException("credentials filename is not set");
-        }
-
-        final FileSystem fs = vertx.fileSystem();
-        log.debug("trying to load credentials information from file {}", getConfig().getCredentialsFilename());
-
-        if (fs.existsBlocking(getConfig().getCredentialsFilename())) {
-            log.info("loading credentials from file {}", getConfig().getCredentialsFilename());
-            fs.readFile(getConfig().getCredentialsFilename(), readAttempt -> {
-                if (readAttempt.succeeded()) {
-                    JsonArray allObjects = new JsonArray(new String(readAttempt.result().getBytes()));
-                    parseCredentials(allObjects);
-                } else {
-                    log.warn("could not load credentials from file [{}]", getConfig().getCredentialsFilename(), readAttempt.cause());
-                }
-            });
+            result.fail(new IllegalStateException("credentials filename is not set"));
         } else {
-            log.debug("credentials file {} does not exist (yet)", getConfig().getCredentialsFilename());
+            final FileSystem fs = vertx.fileSystem();
+            log.debug("trying to load credentials information from file {}", getConfig().getCredentialsFilename());
+
+            if (fs.existsBlocking(getConfig().getCredentialsFilename())) {
+                log.info("loading credentials from file [{}]", getConfig().getCredentialsFilename());
+                fs.readFile(getConfig().getCredentialsFilename(), readAttempt -> {
+                    if (readAttempt.succeeded()) {
+                        JsonArray allObjects = readAttempt.result().toJsonArray();
+                        parseCredentials(allObjects);
+                        result.complete();
+                    } else {
+                        result.fail(readAttempt.cause());
+                    }
+                });
+            } else {
+                log.debug("credentials file [{}] does not exist (yet)", getConfig().getCredentialsFilename());
+                result.complete();
+            }
         }
+        return result;
     }
 
     private void parseCredentials(final JsonArray credentialsObject) {
         final AtomicInteger credentialsCount = new AtomicInteger();
 
+        log.debug("trying to load credentials for {} tenants", credentialsObject.size());
         for (Object obj : credentialsObject) {
             JsonObject tenant = (JsonObject) obj;
             String tenantId = tenant.getString(FIELD_TENANT);
@@ -182,33 +189,12 @@ public final class FileBasedCredentialsService extends BaseCredentialsService<Fi
     }
 
     @Override
-    public final void getCredentials(final String tenantId, final String type, final String authId, final Handler<AsyncResult<CredentialsResult>> resultHandler) {
-        CredentialsResult credentialsResult = getCredentialsResult(tenantId, authId, type);
+    public final void getCredentials(final String tenantId, final String type, final String authId, final Handler<AsyncResult<CredentialsResult<JsonObject>>> resultHandler) {
+        CredentialsResult<JsonObject> credentialsResult = getCredentialsResult(tenantId, authId, type);
         resultHandler.handle(Future.succeededFuture(credentialsResult));
     }
 
-    @Override
-    public void addCredentials(final String tenantId, final JsonObject otherKeys, final Handler<AsyncResult<CredentialsResult>> resultHandler) {
-        // TODO: implement as in memory version
-        CredentialsResult credentialsResult = CredentialsResult.from(HTTP_NOT_IMPLEMENTED);
-        resultHandler.handle(Future.succeededFuture(credentialsResult));
-    }
-
-    @Override
-    public void updateCredentials(final String tenantId, final JsonObject otherKeys, final Handler<AsyncResult<CredentialsResult>> resultHandler) {
-        // TODO: implement as in memory version
-        CredentialsResult credentialsResult = CredentialsResult.from(HTTP_NOT_IMPLEMENTED);
-        resultHandler.handle(Future.succeededFuture(credentialsResult));
-    }
-
-    @Override
-    public void removeCredentials(final String tenantId, final String deviceId, final String type, final String authId, final Handler<AsyncResult<CredentialsResult>> resultHandler) {
-        // TODO: implement as in memory version
-        CredentialsResult credentialsResult = CredentialsResult.from(HTTP_NOT_IMPLEMENTED);
-        resultHandler.handle(Future.succeededFuture(credentialsResult));
-    }
-
-    private CredentialsResult getCredentialsResult(final String tenantId, final String authId, final String type) {
+    private CredentialsResult<JsonObject> getCredentialsResult(final String tenantId, final String authId, final String type) {
         JsonObject data = getCredentials(tenantId, authId, type);
         if (data != null) {
             JsonObject resultPayload = getResultPayload(
@@ -220,14 +206,14 @@ public final class FileBasedCredentialsService extends BaseCredentialsService<Fi
             );
             return CredentialsResult.from(HTTP_OK, resultPayload);
         } else {
-            return CredentialsResult.from(HTTP_NOT_FOUND);
+            return CredentialsResult.from(HTTP_NOT_FOUND, (JsonObject) null);
         }
     }
 
     private JsonObject getCredentials(final String tenantId, final String authId, final String type) {
-        Objects.nonNull(tenantId);
-        Objects.nonNull(authId);
-        Objects.nonNull(type);
+        Objects.requireNonNull(tenantId);
+        Objects.requireNonNull(authId);
+        Objects.requireNonNull(type);
 
         final Map<String, JsonArray> credentialsForTenant = credentials.get(tenantId);
         if (credentialsForTenant != null) {

@@ -132,7 +132,7 @@ As described in the [Getting Started]({{< relref "getting-started.md" >}}) guide
 You can start the client from the `example` folder as follows:
 
 ~~~sh
-~/hono/example$ mvn spring-boot:run -Drun.arguments=--hono.client.host=<IP_ADDRESS>,--hono.client.port=30672,--hono.client.username=consumer@HONO,--hono.client.password=verysecret
+~/hono/example$ mvn spring-boot:run -Drun.arguments=--hono.client.host=<IP_ADDRESS>,--hono.client.port=30671,--hono.client.username=consumer@HONO,--hono.client.password=verysecret
 ~~~
 
 ### Uploading Telemetry
@@ -141,7 +141,7 @@ In order to upload telemetry data to Hono, the device needs to be registered wit
 *Device Registry* by running the following command (i.e. for a device with ID `4711`):
 
 ~~~sh
-$ curl -X POST -i -d 'device_id=4711' http://<IP_ADDRESS>:31080/registration/DEFAULT_TENANT
+$ curl -X POST -i -d 'device-id=4711' http://<IP_ADDRESS>:31080/registration/DEFAULT_TENANT
 ~~~
 
 After having the device registered, uploading telemetry is just a simple HTTP PUT command to the *REST Adapter*:
